@@ -189,6 +189,64 @@ router.post('/apikey', (req, res) => {
   res.json({ ok: true, data: { configured: !!saved } });
 });
 
+// ---------- 一键生成 API Key（经 SSH Query 自动执行 apikeyadd） ----------
+// 密码来源优先级：请求体 password → 容器环境变量 TSSERVER_QUERY_ADMIN_PASSWORD → 日志提取
+router.post('/apikey/generate', async (req, res, next) => {
+  try {
+    const { password } = req.body || {};
+    const ssh = require('../ssh-query');
+
+    let pwd = password || '';
+    let pwdSource = 'manual';
+    if (!pwd && isContainerMode()) {
+      const env = await dockerApi.containerEnv(config.tsContainerName);
+      if (env.TSSERVER_QUERY_ADMIN_PASSWORD) {
+        pwd = env.TSSERVER_QUERY_ADMIN_PASSWORD;
+        pwdSource = 'container-env';
+      }
+    }
+    if (!pwd) {
+      const log = isContainerMode()
+        ? await dockerApi.containerLogs(config.tsContainerName, 10000)
+        : await docker.containerLogs(config.tsContainerName, 10000);
+      const m = String(log).match(/password=\s*"([^"]+)"/);
+      if (m && m[1]) {
+        pwd = m[1];
+        pwdSource = 'log';
+      }
+    }
+    if (!pwd) {
+      return res.status(400).json({
+        ok: false,
+        error: {
+          code: 'NEED_PASSWORD',
+          message: '无法自动获取 serveradmin 密码：请在 .env 中设置 TS_QUERY_ADMIN_PASSWORD 后执行 docker compose up -d teamspeak，或手动输入密码重试',
+        },
+      });
+    }
+
+    const host = config.tsSshHost || new URL(config.tsBaseUrl).hostname;
+    const out = await ssh.runQuery({
+      host,
+      port: config.tsSshPort,
+      username: 'serveradmin',
+      password: pwd,
+      commands: ['apikeyadd scope=manage lifetime=0'],
+    });
+    const apikey = ssh.extractApiKey(out);
+    if (!apikey) {
+      throw Object.assign(new Error(`SSH Query 未返回 API Key（输出尾部：${String(out).slice(-180)}）`), { status: 502 });
+    }
+    setApiKey(apikey); // 自动保存并生效
+    res.json({ ok: true, data: { apikey, passwordSource: pwdSource } });
+  } catch (err) {
+    if (err.code === 'ENOTFOUND' || /ECONNREFUSED|timeout|Handshake|authentication/i.test(err.message)) {
+      err.message = `SSH Query 连接失败（${config.tsSshHost || new URL(config.tsBaseUrl).hostname}:${config.tsSshPort}）：${err.message}`;
+    }
+    next(err);
+  }
+});
+
 // ---------- WebQuery 连通性检测 ----------
 router.get('/check', async (req, res, next) => {
   try {

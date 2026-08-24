@@ -81,7 +81,11 @@ TSPages.deploy = async function () {
     <div class="card" style="margin-top:16px">
       <h3><span class="step-badge">5</span> WebQuery API Key 配置</h3>
       <div class="alert" style="margin-bottom:12px">
-        TS6 的 REST API Key <b>只能通过 SSH Query 生成</b>，请执行：
+        面板可 <b>一键生成</b>（自动经 SSH Query 执行 apikeyadd 并保存），也可手动生成后粘贴：
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btn-gen-key">⚡ 一键生成 API Key</button>
+        <span class="muted" style="font-size:12.5px">需要 serveradmin 密码（自动从容器配置/日志获取，失败时提示输入）</span>
       </div>
       <div class="cmd-box">
         <code>ssh -p <span id="ssh-port">10022</span> serveradmin@&lt;服务器IP&gt;</code>
@@ -366,6 +370,67 @@ TSPages.deploy = async function () {
       btn.disabled = false;
     }
   }
+
+  // 一键生成：自动经 SSH Query 执行 apikeyadd 并保存
+  async function generateApiKey(password) {
+    const d = await API.deployGenerateKey(password ? { password } : undefined);
+    $('apikey-input').value = d.apikey;
+    TSUtils.toast('API Key 已生成并自动保存 ✓', 'success');
+    $('apikey-result').innerHTML = '<div class="empty">检测连接中…</div>';
+    await checkConnection();
+  }
+
+  function askPasswordAndGenerate() {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '输入 serveradmin 密码';
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="alert" style="margin-bottom:10px">未找到可用的 serveradmin 密码（容器环境变量或日志中都没有）。
+        推荐在服务器 .env 设置 <b>TS_QUERY_ADMIN_PASSWORD</b> 后执行 docker compose up -d teamspeak；
+        也可以在此直接输入服务器日志 ④ 中显示的 serveradmin 密码：</div>
+      <label>serveradmin 密码
+        <input type="password" id="gen-pwd" class="input" style="width:100%;margin-top:5px" autofocus>
+      </label>
+      <div class="modal-footer">
+        <button class="btn" id="gen-cancel">取消</button>
+        <button class="btn btn-primary" id="gen-ok">生成</button>
+      </div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    body.querySelector('#gen-cancel').onclick = close;
+    document.getElementById('modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    body.querySelector('#gen-ok').onclick = async () => {
+      const pwd = body.querySelector('#gen-pwd').value;
+      if (!pwd) { TSUtils.toast('请输入密码', 'error'); return; }
+      const okBtn = body.querySelector('#gen-ok');
+      okBtn.disabled = true;
+      try {
+        await generateApiKey(pwd);
+        close();
+      } catch (e2) {
+        TSUtils.toast(e2.message, 'error');
+        okBtn.disabled = false;
+      }
+    };
+    body.querySelector('#gen-pwd').focus();
+  }
+
+  $('btn-gen-key').onclick = async () => {
+    const btn = $('btn-gen-key');
+    btn.disabled = true;
+    try {
+      await generateApiKey();
+    } catch (e) {
+      if (e.code === 'NEED_PASSWORD') {
+        askPasswordAndGenerate();
+      } else {
+        TSUtils.toast(e.message, 'error');
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  };
 
   async function checkConnection() {
     const box = $('apikey-result');

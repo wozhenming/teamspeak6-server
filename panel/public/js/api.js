@@ -30,7 +30,9 @@ const API = (function () {
     }
     if (!res.ok || !json || !json.ok) {
       const msg = (json && json.error && json.error.message) || ('请求失败 (HTTP ' + res.status + ')');
-      throw new Error(msg);
+      const err = new Error(msg);
+      if (json && json.error && json.error.code) err.code = json.error.code;
+      throw err;
     }
     return json.data;
   }
@@ -68,6 +70,7 @@ const API = (function () {
     deployLogs: (tail) => request('GET', `/api/deploy/logs?tail=${tail || 300}`),
     deployCredentials: () => request('GET', '/api/deploy/credentials'),
     deploySetApiKey: (key) => request('POST', '/api/deploy/apikey', { key }),
+    deployGenerateKey: (body) => request('POST', '/api/deploy/apikey/generate', body || {}),
     deployCheck: () => request('GET', '/api/deploy/check'),
   };
 })();

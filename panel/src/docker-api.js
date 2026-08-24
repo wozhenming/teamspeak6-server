@@ -114,6 +114,22 @@ async function containerLogs(name, tail = 300) {
   }
 }
 
+/** 读取容器环境变量（用于自动获取 TS_QUERY_ADMIN_PASSWORD 等） */
+async function containerEnv(name) {
+  try {
+    const r = await api('GET', `/containers/${name}/json`);
+    if (r.status !== 200 || !r.body || !r.body.Config || !Array.isArray(r.body.Config.Env)) return {};
+    const env = {};
+    for (const entry of r.body.Config.Env) {
+      const idx = entry.indexOf('=');
+      if (idx > 0) env[entry.slice(0, idx)] = entry.slice(idx + 1);
+    }
+    return env;
+  } catch (e) {
+    return {};
+  }
+}
+
 /** 容器动作：start / stop / restart */
 async function containerAction(name, action) {
   try {
@@ -133,5 +149,6 @@ module.exports = {
   detect,
   containerStatus,
   containerLogs,
+  containerEnv,
   containerAction,
 };

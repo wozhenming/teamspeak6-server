@@ -38,6 +38,9 @@ const config = {
     return k || readKeyFromEnvFile(envFile);
   })(),
   tsDefaultSid: parseInt(env('TSSERVER_DEFAULT_SID', '1'), 10),
+  // SSH Query（一键生成 API Key 用）
+  tsSshHost: env('TSSERVER_SSH_HOST', ''), // 留空则取 tsBaseUrl 的主机名
+  tsSshPort: parseInt(env('TSSERVER_SSH_PORT', '10022'), 10),
 
   // 部署管理
   deployDir: env('DEPLOY_DIR', path.join(__dirname, '..', '..', 'deploy')),
