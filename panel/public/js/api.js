@@ -56,5 +56,18 @@ const API = (function () {
     createChannel: (sid, data) => request('POST', `/api/servers/${sid}/channels`, data),
     editChannel: (sid, cid, data) => request('PUT', `/api/servers/${sid}/channels/${cid}`, data),
     deleteChannel: (sid, cid) => request('DELETE', `/api/servers/${sid}/channels/${cid}`),
+
+    // 部署管理
+    deployStatus: (name) => request('GET', `/api/deploy/status${name ? '?name=' + encodeURIComponent(name) : ''}`),
+    deployPreview: (p) => request('GET', '/api/deploy/preview?' + Object.keys(p || {}).map(k => `${k}=${encodeURIComponent(p[k] == null ? '' : p[k])}`).join('&')),
+    deployCompose: (data) => request('POST', '/api/deploy/compose', data),
+    deployUp: () => request('POST', '/api/deploy/up'),
+    deployDown: () => request('POST', '/api/deploy/down'),
+    deployRestart: () => request('POST', '/api/deploy/restart'),
+    deployTask: (id) => request('GET', `/api/deploy/task/${id}`),
+    deployLogs: (tail) => request('GET', `/api/deploy/logs?tail=${tail || 300}`),
+    deployCredentials: () => request('GET', '/api/deploy/credentials'),
+    deploySetApiKey: (key) => request('POST', '/api/deploy/apikey', { key }),
+    deployCheck: () => request('GET', '/api/deploy/check'),
   };
 })();

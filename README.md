@@ -32,21 +32,45 @@ teamspeak-server/
 
 ## 快速开始
 
-### 1. 部署 TeamSpeak 6 服务器
+### 方式一（推荐）：面板引导式部署
+
+**只需启动管理面板，整个部署流程在 Web 界面完成**，无需单独执行部署脚本：
+
+```bash
+cd panel
+cp .env.example .env        # 修改面板登录密码（PANEL_PASSWORD）
+npm install
+npm start                   # 启动管理面板 http://127.0.0.1:3000
+```
+
+登录后进入 **「部署管理」** 页面，按步骤操作：
+
+| 步骤 | 操作 | 说明 |
+| ---- | ---- | ---- |
+| ① 环境检测 | 自动检测 Docker / Compose / 引擎 | 缺失时页面给出按发行版的安装命令（可一键复制） |
+| ② 部署配置 | 填写端口与容器名 → 生成 compose | 实时预览 docker-compose.yml |
+| ③ 启动服务 | 点击「启动服务」 | 实时任务日志（拉镜像/启动过程可见） |
+| ④ 初始凭证 | 自动提取并展示 | 管理员 token / Query 密码，可直接复制保存 |
+| ⑤ API Key | 按指引经 SSH Query 生成 → 粘贴保存 | 保存后**立即生效，无需重启面板**，可一键检测连接 |
+
+完成后切到「仪表盘」即可看到服务器实时状态；顶部「部署管理」页仍可随时停止/重启服务、查看日志。
+
+### 方式二：命令行一键部署（install.sh）
 
 ```bash
 cd deploy
 ./install.sh
 ```
 
-脚本会自动：检测 Docker / Docker Compose → 生成 `docker-compose.yml` → 启动服务 →
-从日志提取**初始管理员凭证** → 输出 **WebQuery API Key 生成指引**。
+脚本自动：检测 Docker / Docker Compose → 生成 `docker-compose.yml` → 启动服务 →
+从日志提取**初始管理员凭证** → 输出 **WebQuery API Key 生成指引**。适合无面板场景或自动化脚本调用。
 
 > ⚠️ TS6 Beta 内置 32 槽位免费预览许可证（有效期 2 个月），启动时自动接受。
 
 ### 2. 生成 WebQuery API Key
 
-REST API 的 Key **必须通过 SSH Query 生成**（TS3 的 telnet ServerQuery 已被废弃）：
+REST API 的 Key **必须通过 SSH Query 生成**（TS3 的 telnet ServerQuery 已被废弃），
+也可以直接在面板「部署管理」页按指引生成并填入（保存后立即生效）：
 
 ```
 ssh -p 10022 admin@127.0.0.1        # 密码为日志中的初始管理员密码
@@ -91,6 +115,15 @@ npm start                           # 默认 http://127.0.0.1:3000
 | GET | `/api/me` | 当前会话 |
 | GET | `/api/overview?sid=1` | 仪表盘聚合（服务器信息 + 带宽速率 + 用户 + 频道） |
 | GET | `/api/servers` | 虚拟服务器列表 |
+| GET | `/api/deploy/status` | 部署综合状态（Docker/Compose/容器/WebQuery） |
+| GET | `/api/deploy/preview` | 预览 docker-compose.yml |
+| POST | `/api/deploy/compose` | 生成 docker-compose.yml |
+| POST | `/api/deploy/up` `/down` `/restart` | 启动/停止/重启（返回后台任务 taskId） |
+| GET | `/api/deploy/task/:id` | 后台任务进度（实时输出行） |
+| GET | `/api/deploy/logs?tail=N` | 容器日志 |
+| GET | `/api/deploy/credentials` | 提取初始管理员凭证 |
+| POST | `/api/deploy/apikey` | 保存 API Key（.env 持久化 + 立即生效） |
+| GET | `/api/deploy/check` | 检测 WebQuery 连通性 |
 | GET | `/api/servers/:sid/clients` | 在线用户列表（含频道名） |
 | POST | `/api/servers/:sid/clients/:clid/kick` | 踢出 `{ reason, from: server\|channel }` |
 | POST | `/api/servers/:sid/clients/:clid/ban` | 封禁 `{ reason, time 分钟, ipban }` |
@@ -106,9 +139,11 @@ npm start                           # 默认 http://127.0.0.1:3000
 
 ```bash
 cd panel
-node test/mock-webquery.js                    # 终端 1：模拟 TS6 WebQuery
+node test/mock-webquery.js                          # 终端 1：模拟 TS6 WebQuery
 $env:TSSERVER_API_KEY='test-api-key'; node src/server.js   # 终端 2：面板
-node test/api.test.js                         # 终端 3：运行 29 项端到端测试
+node test/api.test.js                               # 终端 3：业务 API（29 项）
+node test/deploy.test.js                            # 部署管理 API（27 项）
+node test/task.test.js                              # 后台任务流（8 项）
 ```
 
 ## 安全注意事项
@@ -120,7 +155,7 @@ node test/api.test.js                         # 终端 3：运行 29 项端到�
 
 ## 路线图进度
 
-- [x] Phase 1：一键部署脚本（Docker 检测 / 引导安装 / 生成 Compose / 提取凭证 / API Key 指引）
+- [x] Phase 1：一键部署（面板「部署管理」引导式：环境检测 / 生成 Compose / 启动 / 提取凭证 / API Key；`deploy/install.sh` 作为命令行备用）
 - [x] Phase 2：WebQuery API 连接层（认证、错误映射、keep-alive 连接池）
 - [x] Phase 3：基础管理界面（仪表盘 + 用户管理 + 频道管理）
 - [ ] Phase 4：权限管理（服务器组 / 频道组 / 权限编辑器）与高级功能（自动频道、AFK 移动器、欢迎消息、在线人数计数器）

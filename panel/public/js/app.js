@@ -7,6 +7,7 @@
 
 (function () {
   const PAGES = {
+    deploy: { title: '部署管理', render: () => TSPages.deploy() },
     dashboard: { title: '仪表盘', render: () => TSPages.dashboard() },
     users: { title: '用户管理', render: () => TSPages.users() },
     channels: { title: '频道管理', render: () => TSPages.channels() },
