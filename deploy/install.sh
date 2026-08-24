@@ -264,8 +264,9 @@ print_apikey_guide() {
     "  必须先生成一个 API Key（REST API 的 Key 只能通过 SSH Query 生成）："
   printf '\n'
   printf '  方式一（推荐，通过 Docker 容器内 SSH Query）：\n'
-  printf '    ssh -p %s admin@127.0.0.1\n' "$PORT_SSHQUERY"
-  printf '    密码：使用上方日志中显示的初始管理员密码（或 TSSERVER_QUERY_ADMIN_PASSWORD）\n'
+  printf '    ssh -p %s serveradmin@127.0.0.1\n' "$PORT_SSHQUERY"
+  printf '    用户名固定为 serveradmin；密码使用上方日志中显示的初始管理员密码\n'
+  printf '    （或 TSSERVER_QUERY_ADMIN_PASSWORD 设置的值）\n'
   printf '    登录后执行：\n'
   printf '      apikeyadd scope=manage lifetime=0\n'
   printf '      apikeylist        # 查看已生成的 Key\n'

@@ -10,7 +10,7 @@ docker compose up -d          # 一键启动全部服务（自动构建面板镜
 ```
 
 - 管理面板：http://`<主机IP>`:3000 （默认账号 `admin` / `admin123`，请尽快修改）
-- 语音端口：9987/udp · 文件传输：30033 · WebQuery：10080（仅本机）· SSH Query：10022（仅本机）
+- 语音端口：9987/udp · 文件传输：30033 · WebQuery：10080（仅本机）· SSH Query：10022（公网，受 IP 白名单保护）
 
 > 详细设计背景见 [ts服务端开发文档.md](./ts服务端开发文档.md)。
 
@@ -51,7 +51,8 @@ teamspeak-server/
 | `SESSION_SECRET` | please-change-me | 会话签名密钥（`openssl rand -hex 32`） |
 | `PANEL_PORT` | 3000 | 面板端口 |
 | `TS_PORT_VOICE` / `TS_PORT_FILE` | 9987 / 30033 | 语音 / 文件传输端口 |
-| `TS_PORT_WEBQUERY` / `TS_PORT_SSHQUERY` | 10080 / 10022 | Query 端口（默认仅绑定 127.0.0.1） |
+| `TS_PORT_WEBQUERY` / `TS_PORT_SSHQUERY` | 10080 / 10022 | Query 端口（WebQuery 默认仅本机；SSH Query 默认公网） |
+| `TS_QUERY_ADMIN_PASSWORD` | 空 | 覆盖 serveradmin 密码（忘记时重置用，设置后 `docker compose up -d teamspeak`） |
 | `TSSERVER_API_KEY` | 空 | 可预填，也可在部署页填写 |
 
 常用命令：

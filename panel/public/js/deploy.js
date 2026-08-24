@@ -84,8 +84,8 @@ TSPages.deploy = async function () {
         TS6 的 REST API Key <b>只能通过 SSH Query 生成</b>，请执行：
       </div>
       <div class="cmd-box">
-        <code>ssh -p <span id="ssh-port">10022</span> admin@&lt;服务器IP&gt;</code>
-        <button class="btn btn-sm" data-copy="ssh -p 10022 admin@&lt;服务器IP&gt;">复制</button>
+        <code>ssh -p <span id="ssh-port">10022</span> serveradmin@&lt;服务器IP&gt;</code>
+        <button class="btn btn-sm" data-copy="ssh -p 10022 serveradmin@&lt;服务器IP&gt;">复制</button>
       </div>
       <div class="cmd-box">
         <code>apikeyadd scope=manage lifetime=0</code>
@@ -93,12 +93,15 @@ TSPages.deploy = async function () {
       </div>
       <div class="muted" style="font-size:12.5px;line-height:1.8">
         💡 <b>连接被拒绝（Connection refused）？</b>说明 SSH Query 端口只绑定了服务器本机。两种处理：
-        <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 admin@127.0.0.1</code>
+        <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 serveradmin@127.0.0.1</code>
         <br>② 允许远程连接：编辑服务器上 <code class="mono">docker-compose.yml</code>，把 10022 端口行
         <code class="mono">127.0.0.1:\${TS_PORT_SSHQUERY:-10022}</code> 改为 <code class="mono">\${TS_PORT_SSHQUERY:-10022}</code>，
         执行 <code class="mono">docker compose up -d</code>；再把你的公网 IP
         （<code class="mono">curl ifconfig.me</code> 查看）加入 <code class="mono">query_ip_allowlist.txt</code>，
         最后 <code class="mono">docker compose restart teamspeak</code>
+        <br>💡 <b>Permission denied？</b>SSH Query 登录用户名为 <b>serveradmin</b>（不是 admin），
+        密码为部署页 ④ 提取的密码，或 .env 中 <code class="mono">TS_QUERY_ADMIN_PASSWORD</code> 设置的值
+        （设置后需 <code class="mono">docker compose up -d teamspeak</code> 重建生效）。
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
         <input type="text" id="apikey-input" class="input" style="flex:1;min-width:260px" placeholder="粘贴生成的 API Key 后保存（无需重启面板）">
