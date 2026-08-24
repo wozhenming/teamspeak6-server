@@ -26,17 +26,29 @@ async function check(name, cond, extra) {
   }
 }
 
-// ---------- 空闲时长平滑单元验证 ----------
-async function testIdleSmoothing() {
-  const { smoothIdle } = require('../src/routes/clients');
+// ---------- 空闲/连接时长快照平滑单元验证 ----------
+async function testSmoothing() {
+  const { smoothIdle, smoothConnected } = require('../src/routes/clients');
   const CLID = 999001;
-  const s1 = smoothIdle(CLID, 100);            // 首次：直接展示 100
+  const s1 = smoothIdle(CLID, 100);              // 首次：直接展示 100
   await check('空闲首次展示', s1 === 100, s1);
   await new Promise((r) => setTimeout(r, 1100)); // 真实流逝 ~1.1s
-  const s2 = smoothIdle(CLID, 100 + 3600);     // 快照跳变 +3600 → 应平滑为 ~101
-  await check('快照跳变平滑', Math.abs(s2 - 101) <= 1, s2);
-  const s3 = smoothIdle(CLID, 50);             // 用户活动重置 → 直接展示 50
-  await check('活动重置直接展示', s3 === 50, s3);
+  const s2 = smoothIdle(CLID, 100 + 3600);       // 快照跳变 +3600 → 应平滑为 ~101
+  await check('空闲快照跳变平滑', Math.abs(s2 - 101) <= 1, s2);
+  const s3 = smoothIdle(CLID, 50);               // 用户活动重置 → 直接展示 50
+  await check('空闲活动重置直接展示', s3 === 50, s3);
+
+  // 连接时长同样快照化：独立计数器，跳变时平滑
+  const c1 = smoothConnected(CLID, 5000);        // 首次：直接展示 5000
+  await check('连接时长首次展示', c1 === 5000, c1);
+  await new Promise((r) => setTimeout(r, 1100));
+  const c2 = smoothConnected(CLID, 5000 + 7200); // 快照跳变 +7200 → 应平滑为 ~5001
+  await check('连接时长快照跳变平滑', Math.abs(c2 - 5001) <= 1, c2);
+  const c3 = smoothConnected(CLID, 30);          // 重连重置 → 直接展示 30
+  await check('连接时长重连直接展示', c3 === 30, c3);
+  // idle 与 connected 缓存相互独立：idle 基于自己的缓存平滑（50 + 真实流逝 ~2-3s）
+  const s4 = smoothIdle(CLID, 60);
+  await check('计数器相互独立', s4 >= 51 && s4 <= 54, s4);
 }
 
 async function login() {
@@ -52,7 +64,7 @@ async function login() {
 (async () => {
   // 空闲平滑单元验证（不依赖面板服务）
   console.log('\n[空闲平滑]');
-  await testIdleSmoothing();
+  await testSmoothing();
 
   const cookie = await login();
   const H = { cookie };

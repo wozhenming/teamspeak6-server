@@ -19,36 +19,44 @@ function sidOf(req) {
   return parseInt(req.params.sid, 10) || 1;
 }
 
-// ---------- 空闲时长平滑 ----------
-// 实测：TS6 的 client_idle_time 为周期性快照（约每 50 分钟刷新一次），
-// 两次请求间可能凭空跳变数十分钟。为避免用户表显示跳变，做平滑：
+// ---------- 单调计数器快照平滑（通用） ----------
+// 实测：TS6 的 client_idle_time / connection_connected_time 均为周期性快照，
+// 两次请求间可能凭空跳变数十分钟（实测 idle 3 秒内 +3000 秒）。
+// 为避免用户表显示跳变，做平滑：
 //  - 未重置（raw >= 上次值）：展示 min(raw, 上次值 + 真实流逝时间)
-//  - 已重置（raw < 上次值，用户活动了）：直接展示 raw
-const idleCache = new Map(); // clid -> { value, at }
+//  - 已重置（raw < 上次值，如用户活动/重连）：直接展示 raw
+const counterCache = new Map(); // key -> { value, at }
 
-function smoothIdle(clid, raw) {
+function smoothCounter(key, raw) {
   const now = Date.now();
   if (raw == null || raw === '') {
-    idleCache.delete(clid);
+    counterCache.delete(key);
     return null;
   }
   const seconds = Number(raw);
-  const prev = idleCache.get(clid);
+  const prev = counterCache.get(key);
   if (prev && seconds >= prev.value) {
     const estimated = prev.value + Math.floor((now - prev.at) / 1000);
     const shown = Math.min(seconds, estimated);
-    idleCache.set(clid, { value: shown, at: now });
+    counterCache.set(key, { value: shown, at: now });
     return shown;
   }
-  idleCache.set(clid, { value: seconds, at: now });
+  counterCache.set(key, { value: seconds, at: now });
   return seconds;
 }
+
+// idle 与连接时长分别计数（同一 clid 两个计数器，用前缀区分）
+const smoothIdle = (clid, raw) => smoothCounter('i:' + clid, raw);
+const smoothConnected = (clid, raw) => smoothCounter('c:' + clid, raw);
 
 function mapClient(c, info) {
   const clid = Number(c.clid);
   const rawIdle = (info && info.client_idle_time != null)
     ? info.client_idle_time
     : (c.client_idle_time != null ? c.client_idle_time : null);
+  const rawConnected = (info && info.connection_connected_time != null)
+    ? info.connection_connected_time
+    : (c.client_connected_time != null ? c.client_connected_time : (c.connection_connected_time != null ? c.connection_connected_time : null));
   return {
     clid,
     cid: Number(c.cid),
@@ -56,9 +64,7 @@ function mapClient(c, info) {
     uid: c.client_unique_identifier || '',
     country: c.client_country || '',
     // TS6 查询接口不提供单用户 Ping（官方文档无此字段），故不返回
-    connected_seconds: (info && info.connection_connected_time != null)
-      ? info.connection_connected_time
-      : (c.client_connected_time != null ? c.client_connected_time : (c.connection_connected_time != null ? c.connection_connected_time : null)),
+    connected_seconds: smoothConnected(clid, rawConnected),
     idle_seconds: smoothIdle(clid, rawIdle),
     away: c.client_away === 1 || c.client_away === '1',
     is_query: String(c.client_type) === '1',
@@ -141,4 +147,5 @@ router.post('/:clid/message', async (req, res, next) => {
 });
 
 module.exports = router;
-module.exports.smoothIdle = smoothIdle; // 供单元测试
+module.exports.smoothIdle = smoothIdle;         // 供单元测试
+module.exports.smoothConnected = smoothConnected; // 供单元测试
