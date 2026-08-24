@@ -20,6 +20,7 @@ const points = []; // { t, clients, up, down }
 let recentClients = []; // { clid, nickname, uid, channel_name, joined_at }
 let knownClients = new Set();
 let timer = null;
+let saveTimer = null;
 
 async function sample() {
   const sid = config.tsDefaultSid;
@@ -70,8 +71,34 @@ async function sample() {
 
 function start() {
   if (timer) return;
+  load();
   sample();
   timer = setInterval(sample, SAMPLE_MS);
+  saveTimer = setInterval(save, 5 * 60000); // 每 5 分钟持久化一次
+}
+
+// ---------- 持久化（面板重启不丢历史） ----------
+const metricsFile = config.metricsFile;
+
+function save() {
+  try {
+    if (!points.length) return;
+    const fs = require('fs');
+    fs.writeFileSync(metricsFile, JSON.stringify(points), 'utf8');
+  } catch (e) { /* 持久化失败忽略 */ }
+}
+
+function load() {
+  try {
+    const fs = require('fs');
+    if (!fs.existsSync(metricsFile)) return;
+    const arr = JSON.parse(fs.readFileSync(metricsFile, 'utf8'));
+    if (Array.isArray(arr)) {
+      points.length = 0;
+      points.push(...arr.filter((p) => p && typeof p.t === 'number'));
+      if (points.length > MAX_POINTS) points.splice(0, points.length - MAX_POINTS);
+    }
+  } catch (e) { /* 读取失败忽略 */ }
 }
 
 /** 最近 minutes 分钟的历史点（按时间升序） */
@@ -87,4 +114,4 @@ function recent() {
   return recentClients;
 }
 
-module.exports = { start, history, recent, SAMPLE_MS };
+module.exports = { start, history, recent, save, load, metricsFile, SAMPLE_MS };

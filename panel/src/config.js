@@ -53,6 +53,8 @@ const config = {
   publicDir: path.join(__dirname, '..', 'public'),
   // 初始管理员凭证持久化文件（与配置文件同目录：容器内为数据卷 /app/config）
   credentialFile: path.join(path.dirname(envFile), 'ts6-credentials.txt'),
+  // 指标采样历史持久化文件（仪表盘图表重启不丢）
+  metricsFile: path.join(path.dirname(envFile), 'ts6-metrics.json'),
 };
 
 /**

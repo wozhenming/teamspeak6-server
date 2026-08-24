@@ -90,16 +90,37 @@ TSPages.dashboard = async function () {
     });
   }
 
+  // 按当前范围绘制固定时间轴网格（切换范围后轴跨度明显变化，数据点对齐网格）
   function renderCharts() {
     ensureCharts();
     if (!clientsChart) return;
-    const labels = historyCache.map(h => new Date(h.t).toLocaleTimeString('zh-CN', { hour12: false }));
+    const now = Date.now();
+    const start = now - range * 60000;
+    const STEP = 5 * 60000; // 轴网格步长 5 分钟
+    const count = Math.max(1, Math.ceil((range * 60000) / STEP));
+    const labels = [];
+    const clientsData = new Array(count).fill(null);
+    const upData = new Array(count).fill(null);
+    const downData = new Array(count).fill(null);
+
+    for (let i = 0; i < count; i++) {
+      labels.push(new Date(start + i * STEP).toLocaleTimeString('zh-CN', { hour12: false }));
+    }
+    for (const p of historyCache) {
+      const idx = Math.round((p.t - start) / STEP);
+      if (idx >= 0 && idx < count) {
+        clientsData[idx] = p.clients;
+        upData[idx] = p.up;
+        downData[idx] = p.down;
+      }
+    }
+
     clientsChart.data.labels = labels;
-    clientsChart.data.datasets[0].data = historyCache.map(h => h.clients);
+    clientsChart.data.datasets[0].data = clientsData;
     clientsChart.update('none');
     bandwidthChart.data.labels = labels;
-    bandwidthChart.data.datasets[0].data = historyCache.map(h => h.up);
-    bandwidthChart.data.datasets[1].data = historyCache.map(h => h.down);
+    bandwidthChart.data.datasets[0].data = upData;
+    bandwidthChart.data.datasets[1].data = downData;
     bandwidthChart.update('none');
   }
 
