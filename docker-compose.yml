@@ -1,0 +1,69 @@
+# ============================================================================
+# TeamSpeak 6 全栈一键部署：TS6 服务器 + Web 管理面板
+#
+# 用法：
+#   docker compose up -d          # 一键启动全部服务
+#   docker compose logs -f panel  # 查看面板日志
+#   docker compose down           # 停止（保留数据卷）
+#
+# 可选配置：复制 .env.example 为 .env 后按需修改（面板密码、端口等）。
+# 首次部署：打开 http://<主机>:3000 → 「部署管理」页查看初始凭证并配置 API Key。
+# ============================================================================
+
+services:
+  # ---------- TeamSpeak 6 服务器 ----------
+  teamspeak:
+    image: teamspeaksystems/teamspeak6-server:latest
+    container_name: teamspeak-server
+    restart: unless-stopped
+    ports:
+      - "${TS_PORT_VOICE:-9987}:9987/udp"      # 语音端口（必须）
+      - "${TS_PORT_FILE:-30033}:30033/tcp"     # 文件传输端口
+      - "127.0.0.1:${TS_PORT_WEBQUERY:-10080}:10080/tcp"  # WebQuery HTTP API（面板经内网访问；如需远程管理去掉 127.0.0.1:）
+      - "127.0.0.1:${TS_PORT_SSHQUERY:-10022}:10022/tcp"  # SSH Query（生成 API Key 用；同上）
+    environment:
+      - TSSERVER_LICENSE_ACCEPTED=${TS_LICENSE_ACCEPTED:-accept}
+      - TSSERVER_QUERY_HTTP_ENABLED=true   # 启用 WebQuery HTTP API（管理面板必需，默认禁用）
+      - TSSERVER_QUERY_SSH_ENABLED=true    # 启用 SSH Query（API Key 生成必需，默认禁用）
+      - TSSERVER_QUERY_ALLOW_LIST=/etc/tsserver/query_ip_allowlist.txt  # Query 接口 IP 白名单
+      # 覆盖默认 Query 管理员密码（可选）：
+      # - TSSERVER_QUERY_ADMIN_PASSWORD=your_password
+    volumes:
+      - teamspeak-data:/var/tsserver/
+      - ./query_ip_allowlist.txt:/etc/tsserver/query_ip_allowlist.txt:ro
+    networks:
+      - ts6
+
+  # ---------- Web 管理面板 ----------
+  panel:
+    build: ./panel
+    image: ts6-panel:local
+    container_name: ts6-panel
+    restart: unless-stopped
+    ports:
+      - "${PANEL_PORT:-3000}:3000"             # 管理面板
+    environment:
+      - HOST=0.0.0.0
+      - PORT=3000
+      - PANEL_USERNAME=${PANEL_USERNAME:-admin}
+      - PANEL_PASSWORD=${PANEL_PASSWORD:-admin123}   # ⚠️ 生产环境务必通过 .env 修改
+      - SESSION_SECRET=${SESSION_SECRET:-please-change-me}
+      - TSSERVER_BASE_URL=http://teamspeak:10080      # 容器网络内访问 TS6 WebQuery
+      - TSSERVER_API_KEY=${TSSERVER_API_KEY:-}        # 也可在「部署管理」页填写（持久化）
+      - TSSERVER_CONTAINER_NAME=teamspeak-server
+      - PANEL_RUN_MODE=container               # 容器化模式：部署页操作/日志对接主机 Docker
+      - PANEL_ENV_FILE=/app/config/panel.env   # API Key 等配置持久化位置
+    volumes:
+      - panel-config:/app/config               # 持久化面板配置（API Key 等）
+      - /var/run/docker.sock:/var/run/docker.sock   # 读取 TS6 容器日志/凭证、快捷启停
+    depends_on:
+      - teamspeak
+    networks:
+      - ts6
+
+volumes:
+  teamspeak-data:
+  panel-config:
+
+networks:
+  ts6:

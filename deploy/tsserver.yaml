@@ -21,11 +21,15 @@
 # license:
 #   accepted: true
 
-# Query 接口
+# Query 接口（⚠️ 默认全部禁用，必须在配置中显式启用）
 # query:
 #   http:
-#     enabled: true
+#     enable: true
 #     port: 10080
 #   ssh:
-#     enabled: true
+#     enable: true
 #     port: 10022
+#
+# 推荐直接用环境变量启用（docker-compose.yml 已默认开启）：
+#   TSSERVER_QUERY_HTTP_ENABLED=true
+#   TSSERVER_QUERY_SSH_ENABLED=true

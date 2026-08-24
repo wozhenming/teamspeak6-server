@@ -1,0 +1,13 @@
+# TeamSpeak 6 Query 接口 IP 白名单
+# 不在列表中的 IP 连接 WebQuery(10080)/SSH Query(10022) 会被立即断开。
+# 每行一个 IP 或 CIDR（支持 IPv4/IPv6）。
+#
+# 默认包含本机与常见内网/Docker 网段；按需增删。
+# 注意：如果改动了本文件，需要重启 teamspeak 容器生效：
+#   docker compose restart teamspeak
+
+127.0.0.1
+::1
+172.16.0.0/12
+10.0.0.0/8
+192.168.0.0/16

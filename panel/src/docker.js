@@ -136,9 +136,13 @@ function renderCompose(opts = {}) {
     sshLine,
     '    environment:',
     `      - TSSERVER_LICENSE_ACCEPTED=${licenseAccepted}  # 接受许可证（内置 32 槽位预览许可证）`,
+    '      - TSSERVER_QUERY_HTTP_ENABLED=true  # 启用 WebQuery HTTP API（管理面板必需，默认禁用）',
+    '      - TSSERVER_QUERY_SSH_ENABLED=true   # 启用 SSH Query（API Key 生成必需，默认禁用）',
+    '      - TSSERVER_QUERY_ALLOW_LIST=/etc/tsserver/query_ip_allowlist.txt  # Query 接口 IP 白名单',
     pwLine,
     '    volumes:',
     '      - teamspeak-data:/var/tsserver/     # 数据持久化',
+    '      - ./query_ip_allowlist.txt:/etc/tsserver/query_ip_allowlist.txt:ro',
     yamlMount,
     '',
     'volumes:',
@@ -157,6 +161,19 @@ async function saveComposeFile(opts, force = false) {
     const err = new Error(`docker-compose.yml 已存在（${file}），如需覆盖请确认`);
     err.status = 409;
     throw err;
+  }
+  // 确保 Query 接口 IP 白名单文件存在（compose 模板会挂载它）
+  const allowlistPath = path.join(config.deployDir, 'query_ip_allowlist.txt');
+  if (!fs.existsSync(allowlistPath)) {
+    await fs.promises.mkdir(config.deployDir, { recursive: true });
+    await fs.promises.writeFile(allowlistPath, [
+      '127.0.0.1',
+      '::1',
+      '172.16.0.0/12',
+      '10.0.0.0/8',
+      '192.168.0.0/16',
+      '',
+    ].join('\n'), 'utf8');
   }
   const content = renderCompose(opts);
   await fs.promises.mkdir(config.deployDir, { recursive: true });

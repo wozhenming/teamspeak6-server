@@ -11,7 +11,7 @@
  * 面板默认账号 admin/admin123（.env）。
  */
 
-const BASE = 'http://127.0.0.1:3000';
+const BASE = process.env.TEST_BASE || 'http://127.0.0.1:3000';
 
 let passed = 0;
 let failed = 0;
@@ -105,14 +105,15 @@ async function login() {
   r = await fetch(`${BASE}/api/servers/1/channels`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'New Room', parent_cid: 1, max_clients: 10, password: 'pw', topic: 't' }) });
   j = await r.json();
-  await check('channelcreate 200 且返回 cid', r.status === 200 && j.ok && j.data.cid === 101, j.data);
+  const newCid = j.data && j.data.cid;
+  await check('channelcreate 200 且返回 cid', r.status === 200 && j.ok && Number(newCid) > 0, j.data);
 
-  r = await fetch(`${BASE}/api/servers/1/channels/101`, { method: 'PUT', headers: { ...H, 'Content-Type': 'application/json' },
+  r = await fetch(`${BASE}/api/servers/1/channels/${newCid}`, { method: 'PUT', headers: { ...H, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: 'Renamed', max_clients: 20, order: 5 }) });
   j = await r.json();
   await check('channeledit 200', r.status === 200 && j.ok && j.data.edited);
 
-  r = await fetch(`${BASE}/api/servers/1/channels/101`, { method: 'DELETE', headers: H });
+  r = await fetch(`${BASE}/api/servers/1/channels/${newCid}`, { method: 'DELETE', headers: H });
   j = await r.json();
   await check('channeldelete 200', r.status === 200 && j.ok && j.data.deleted);
 

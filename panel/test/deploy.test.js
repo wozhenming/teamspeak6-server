@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const BASE = 'http://127.0.0.1:3000';
+const BASE = process.env.TEST_BASE || 'http://127.0.0.1:3000';
 
 let passed = 0;
 let failed = 0;
@@ -51,7 +51,9 @@ async function login() {
   await check('docker 检测字段', j.data && typeof j.data.docker.installed === 'boolean' && j.data.docker.compose !== undefined, j.data && j.data.docker);
   await check('composeFile 路径', j.data && j.data.composeFile.path.endsWith('docker-compose.yml'));
   await check('distro 识别', j.data && j.data.distro && typeof j.data.distro.id === 'string');
-  await check('未配置 Key 时 WebQuery 不可达', j.data && j.data.webquery && j.data.webquery.keyConfigured === false && j.data.webquery.reachable === false, j.data && j.data.webquery);
+  await check('WebQuery 状态字段', j.data && j.data.webquery && typeof j.data.webquery.keyConfigured === 'boolean' && typeof j.data.webquery.reachable === 'boolean', j.data && j.data.webquery);
+  await check('未配置 Key 时不可达', !(j.data && j.data.webquery && j.data.webquery.keyConfigured === false) || (j.data.webquery.reachable === false), j.data && j.data.webquery);
+  await check('mode 字段', j.data && (j.data.mode === 'standalone' || j.data.mode === 'container'));
   await check('容器状态字段', j.data && j.data.container && typeof j.data.container.exists === 'boolean');
 
   // 幂等性：清理上次运行残留的 compose 文件
@@ -70,6 +72,8 @@ async function login() {
   await check('语音端口', c.includes('"9987:9987/udp"'));
   await check('SSH Query 端口', c.includes('"10022:10022/tcp"'));
   await check('许可证环境变量', c.includes('TSSERVER_LICENSE_ACCEPTED'));
+  await check('WebQuery 启用变量', c.includes('TSSERVER_QUERY_HTTP_ENABLED=true') && c.includes('TSSERVER_QUERY_SSH_ENABLED=true'));
+  await check('白名单挂载', c.includes('query_ip_allowlist.txt'));
 
   // ---------- 生成 compose ----------
   console.log('\n[生成 compose]');
@@ -155,10 +159,10 @@ async function login() {
   j = await r.json();
   await check('连接检测成功', r.status === 200 && j.ok && j.data.reachable === true && j.data.version === '6.0.0-beta.5', j.data);
 
-  // 恢复 .env（清空 Key）
+  // 结束时恢复 mock 用的 Key（保证与其他测试套件按任意顺序运行都能通过）
   await fetch(`${BASE}/api/deploy/apikey`, {
     method: 'POST', headers: { ...H, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key: '' }),
+    body: JSON.stringify({ key: 'test-api-key' }),
   });
 
   // ---------- 单元：凭证提取逻辑 ----------

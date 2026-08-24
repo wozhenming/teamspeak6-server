@@ -167,6 +167,20 @@ generate_compose() {
     yaml_mount="      - ./tsserver.yaml:/etc/tsserver/tsserver.yaml  # 自定义配置"
   fi
 
+  # Query 接口 IP 白名单（默认仅本机；面板/远程管理需要加入对应网段）
+  local allowlist_mount=""
+  if [ ! -f "$INSTALL_DIR/query_ip_allowlist.txt" ]; then
+    cat > "$INSTALL_DIR/query_ip_allowlist.txt" <<'EOF'
+127.0.0.1
+::1
+172.16.0.0/12
+10.0.0.0/8
+192.168.0.0/16
+EOF
+    ok "已生成 query_ip_allowlist.txt（Query 接口 IP 白名单，可按需修改）"
+  fi
+  allowlist_mount="      - ./query_ip_allowlist.txt:/etc/tsserver/query_ip_allowlist.txt:ro"
+
   cat > "$COMPOSE_FILE" <<EOF
 version: '3'
 
@@ -182,9 +196,13 @@ services:
 ${ssh_port_line}
     environment:
       - TSSERVER_LICENSE_ACCEPTED=${LICENSE_ACCEPTED}  # 接受许可证（内置 32 槽位预览许可证）
+      - TSSERVER_QUERY_HTTP_ENABLED=true  # 启用 WebQuery HTTP API（管理面板必需，默认禁用）
+      - TSSERVER_QUERY_SSH_ENABLED=true   # 启用 SSH Query（API Key 生成必需，默认禁用）
+      - TSSERVER_QUERY_ALLOW_LIST=/etc/tsserver/query_ip_allowlist.txt  # Query 接口 IP 白名单
 ${query_admin_line}
     volumes:
       - teamspeak-data:/var/tsserver/     # 数据持久化
+${allowlist_mount}
 ${yaml_mount}
 
 volumes:

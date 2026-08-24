@@ -11,12 +11,12 @@ window.TSPages = window.TSPages || {};
 
 TSPages.deploy = async function () {
   const content = document.getElementById('page-content');
-  const CONTAINER = 'teamspeak-server';
   let status = null;
   let taskTimer = null;
 
   content.innerHTML = `
     <div id="deploy-alert"></div>
+    <div id="mode-banner"></div>
 
     <div class="grid grid-2">
       <!-- ① 环境检测 -->
@@ -28,12 +28,12 @@ TSPages.deploy = async function () {
         <div style="margin-top:12px" class="muted" id="env-guide"></div>
       </div>
 
-      <!-- ② 部署配置 -->
-      <div class="card">
+      <!-- ② 部署配置（独立模式） -->
+      <div class="card" id="card-config">
         <h3><span class="step-badge">2</span> 部署配置</h3>
         <div class="deploy-form">
           <div class="form-row">
-            <label>容器名<input type="text" id="cfg-name" value="${CONTAINER}"></label>
+            <label>容器名<input type="text" id="cfg-name" value="teamspeak-server"></label>
             <label>语音端口 (UDP)<input type="number" id="cfg-voice" value="9987"></label>
           </div>
           <div class="form-row">
@@ -60,7 +60,7 @@ TSPages.deploy = async function () {
         <span id="container-state" class="badge">未知</span>
       </h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <button class="btn btn-primary" id="btn-up">🚀 启动服务（docker compose up -d）</button>
+        <button class="btn btn-primary" id="btn-up">🚀 启动服务</button>
         <button class="btn" id="btn-restart">重启</button>
         <button class="btn btn-danger" id="btn-down">停止</button>
         <button class="btn" id="btn-refresh-status">刷新状态</button>
@@ -136,8 +136,9 @@ TSPages.deploy = async function () {
   // ============ ① 环境检测 ============
   async function loadStatus() {
     try {
-      status = await API.deployStatus(CONTAINER);
+      status = await API.deployStatus();
       renderEnv();
+      renderMode();
       renderContainer();
       renderComposeInfo();
       renderApiKeyState();
@@ -146,23 +147,53 @@ TSPages.deploy = async function () {
     }
   }
 
+  // 容器化模式 / 独立模式界面切换
+  function renderMode() {
+    const isContainer = status && status.mode === 'container';
+    const banner = $('mode-banner');
+    const configCard = $('card-config');
+
+    if (isContainer) {
+      banner.innerHTML = `<div class="alert">🧊 容器化模式：TS6 服务器与本面板由项目根目录 <b>docker-compose.yml</b> 统一管理
+        （docker compose up -d 启动）。本页提供初始凭证提取、API Key 配置、日志查看与 TS6 容器快捷启停。</div>`;
+      if (configCard) configCard.hidden = true;
+      $('btn-up').innerHTML = '▶ 启动 TS6 容器';
+      $('btn-up').title = 'docker start teamspeak-server';
+      $('btn-restart').innerHTML = '重启容器';
+      $('btn-down').innerHTML = '停止容器';
+    } else {
+      banner.innerHTML = '';
+      if (configCard) configCard.hidden = false;
+      $('btn-up').innerHTML = '🚀 启动服务（docker compose up -d）';
+      $('btn-up').title = '';
+      $('btn-restart').innerHTML = '重启';
+      $('btn-down').innerHTML = '停止';
+    }
+  }
+
   function renderEnv() {
     const d = status.docker;
+    const isContainer = status.mode === 'container';
     const box = $('env-check');
+    const composeCell = isContainer
+      ? '<span class="badge green">由主机 compose 管理</span>'
+      : (d.compose
+        ? `<span class="badge green">可用</span> ${escape(d.compose.command)} ${escape(d.compose.version || '')}`
+        : '<span class="badge red">不可用</span>');
     const rows = [
       ['Docker', d.installed ? `<span class="badge green">已安装</span> ${escape(d.dockerVersion || '')}` : '<span class="badge red">未安装</span>'],
-      ['Compose', d.compose ? `<span class="badge green">可用</span> ${escape(d.compose.command)} ${escape(d.compose.version || '')}` : '<span class="badge red">不可用</span>'],
+      ['Compose', composeCell],
       ['Docker 引擎', d.engineOk ? '<span class="badge green">连接正常</span>' : `<span class="badge red">不可用</span>${d.engineError ? '<div class="muted" style="font-size:12px">' + escape(d.engineError) + '</div>' : ''}`],
     ];
     box.innerHTML = '<table>' + rows.map(r => `<tr><td class="muted">${r[0]}</td><td>${r[1]}</td></tr>`).join('') + '</table>';
 
     const guide = $('env-guide');
-    if (!d.installed || !d.compose) {
+    if (!isContainer && (!d.installed || !d.compose)) {
       const cmds = status.dockerInstallGuide || [];
       guide.innerHTML = '<div class="alert">Docker/Compose 未就绪，请按以下命令安装后点击「刷新状态」：</div>' +
         cmds.map(c => `<div class="cmd-box"><code>${escape(c)}</code><button class="btn btn-sm" data-copy="${escape(c)}">复制</button></div>`).join('');
     } else if (!d.engineOk) {
-      guide.innerHTML = '<div class="alert">Docker 已安装但引擎不可用，请确认 Docker 服务已启动（如 systemctl start docker）。</div>';
+      guide.innerHTML = '<div class="alert">Docker 引擎不可用，请确认 Docker 服务已启动（如 systemctl start docker）。</div>';
     } else {
       guide.innerHTML = '';
     }
@@ -195,10 +226,10 @@ TSPages.deploy = async function () {
       </div>`;
   }
 
-  // ============ ② 部署配置 ============
+  // ============ ② 部署配置（仅独立模式） ============
   function previewParams() {
     return {
-      name: $('cfg-name').value.trim() || CONTAINER,
+      name: $('cfg-name').value.trim() || 'teamspeak-server',
       voice: $('cfg-voice').value || 9987,
       file: $('cfg-file').value || 30033,
       webquery: $('cfg-webquery').value || 10080,
@@ -208,6 +239,7 @@ TSPages.deploy = async function () {
   }
 
   async function refreshPreview() {
+    if (!status || status.mode === 'container') return;
     try {
       const d = await API.deployPreview(previewParams());
       $('compose-preview').textContent = d.content;

@@ -2,11 +2,25 @@
 
 const path = require('path');
 const fs = require('fs');
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+// 配置文件路径：容器内由 PANEL_ENV_FILE 指向持久化 volume（重启不丢），本地默认 panel/.env
+const envFile = process.env.PANEL_ENV_FILE || path.join(__dirname, '..', '.env');
+require('dotenv').config({ path: envFile });
 
 function env(key, fallback) {
   const v = process.env[key];
   return v === undefined || v === '' ? fallback : v;
+}
+
+/** 从持久化配置文件中读取 API Key（环境变量为空时的回退，保证部署页保存后重启仍生效） */
+function readKeyFromEnvFile(file) {
+  try {
+    const txt = fs.readFileSync(file, 'utf8');
+    const m = txt.match(/^TSSERVER_API_KEY=(.*)$/m);
+    return m ? m[1].trim() : '';
+  } catch (e) {
+    return '';
+  }
 }
 
 const config = {
@@ -19,35 +33,41 @@ const config = {
 
   // TeamSpeak 6 WebQuery
   tsBaseUrl: env('TSSERVER_BASE_URL', 'http://127.0.0.1:10080').replace(/\/+$/, ''),
-  tsApiKey: env('TSSERVER_API_KEY', ''),
+  tsApiKey: (() => {
+    const k = env('TSSERVER_API_KEY', '');
+    return k || readKeyFromEnvFile(envFile);
+  })(),
   tsDefaultSid: parseInt(env('TSSERVER_DEFAULT_SID', '1'), 10),
 
-  // 部署管理（Docker Compose 文件目录）
+  // 部署管理
   deployDir: env('DEPLOY_DIR', path.join(__dirname, '..', '..', 'deploy')),
+  // 容器化模式（container=由根目录 docker-compose 管理，部署页操作主机 Docker 容器）
+  runMode: env('PANEL_RUN_MODE', 'standalone'),
+  // TS6 容器名（容器化模式下读取日志/凭证、快捷启停）
+  tsContainerName: env('TSSERVER_CONTAINER_NAME', 'teamspeak-server'),
 
   // 派生路径
   publicDir: path.join(__dirname, '..', 'public'),
 };
 
 /**
- * 运行时更新 WebQuery API Key：立即生效（内存）并持久化到 .env。
- * 这样在部署页填入 Key 后无需重启面板。
+ * 运行时更新 WebQuery API Key：立即生效（内存）并持久化到配置文件。
+ * 容器内写入 /app/config/panel.env（volume），重启不丢失。
  */
 function setApiKey(key) {
   config.tsApiKey = String(key || '').trim();
-  const envPath = path.join(__dirname, '..', '.env');
   try {
-    let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+    let content = fs.existsSync(envFile) ? fs.readFileSync(envFile, 'utf8') : '';
     const re = /^TSSERVER_API_KEY=.*$/m;
     if (re.test(content)) {
       content = content.replace(re, `TSSERVER_API_KEY=${config.tsApiKey}`);
     } else {
       content += (content.endsWith('\n') ? '' : '\n') + `TSSERVER_API_KEY=${config.tsApiKey}\n`;
     }
-    fs.writeFileSync(envPath, content, 'utf8');
+    fs.writeFileSync(envFile, content, 'utf8');
   } catch (err) {
     // 持久化失败不阻断（本次运行仍生效）
-    console.warn('[config] 无法写入 .env（API Key 仅在本次运行生效）:', err.message);
+    console.warn('[config] 无法写入配置文件（API Key 仅在本次运行生效）:', err.message);
   }
   return config.tsApiKey;
 }
@@ -64,4 +84,4 @@ if (!config.tsApiKey) {
   warnings.push('未配置 TSSERVER_API_KEY，请进入「部署管理」页生成并填写 API Key。');
 }
 
-module.exports = { config, warnings, setApiKey };
+module.exports = { config, warnings, setApiKey, envFile };

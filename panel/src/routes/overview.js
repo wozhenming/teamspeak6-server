@@ -69,12 +69,13 @@ function mapChannel(ch) {
 router.get('/', async (req, res, next) => {
   try {
     const sid = parseInt(req.query.sid, 10) || 1;
+    const safe = (p, label) => p.catch((e) => { console.warn(`[overview] ${label} 失败:`, e.message); return null; });
     const [version, server, connInfo, clients, channels] = await Promise.all([
-      ts.version().catch(() => null),
-      ts.serverinfo(sid).catch(() => null),
-      ts.connectionInfo(sid).catch(() => null),
-      ts.clientlist(sid).catch(() => []),
-      ts.channellist(sid).catch(() => []),
+      safe(ts.version(), 'version'),
+      safe(ts.serverinfo(sid), 'serverinfo'),
+      safe(ts.connectionInfo(sid), 'connectionInfo'),
+      safe(ts.clientlist(sid).then((v) => v || []), 'clientlist'),
+      safe(ts.channellist(sid).then((v) => v || []), 'channellist'),
     ]);
 
     if (!server) {

@@ -34,7 +34,10 @@ class WebQueryError extends Error {
 // 因此这里使用原生 http/https 模块。
 const isHttps = config.tsBaseUrl.startsWith('https:');
 const AgentCtor = isHttps ? https.Agent : http.Agent;
-const agent = new AgentCtor({ keepAlive: true, maxSockets: 1 });
+// ⚠️ 实测 TS6 WebQuery HTTP 服务不支持 keep-alive：复用连接会触发
+// “socket hang up”（第二个请求发到已关闭的连接）。因此每个请求使用
+// 独立连接；maxSockets 限制并发，避免产生过多查询客户端。
+const agent = new AgentCtor({ keepAlive: false, maxSockets: 4 });
 
 function cleanParams(params) {
   if (!params) return undefined;

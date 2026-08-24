@@ -32,7 +32,7 @@ function num(v, fallback) {
 // ---------- 综合状态 ----------
 router.get('/status', async (req, res, next) => {
   try {
-    const containerName = req.query.name || 'teamspeak-server';
+    const containerName = req.query.name || config.tsContainerName;
     const [env, container, composeFile, wq] = await Promise.all([
       docker.detectDocker(),
       docker.containerStatus(containerName),
@@ -46,6 +46,8 @@ router.get('/status', async (req, res, next) => {
     res.json({
       ok: true,
       data: {
+        mode: config.runMode,
+        containerName,
         distro: docker.detectDistro(),
         docker: env,
         dockerInstallGuide: env.installed ? [] : docker.dockerInstallGuide(docker.detectDistro()),
@@ -65,8 +67,11 @@ router.get('/status', async (req, res, next) => {
   }
 });
 
-// ---------- 预览 compose ----------
+// ---------- 预览 compose（容器化模式下由根目录 compose 管理，不适用） ----------
 router.get('/preview', (req, res) => {
+  if (config.runMode === 'container') {
+    return res.status(400).json({ ok: false, error: { code: 'CONTAINER_MODE', message: '容器化模式下 docker-compose.yml 由项目根目录管理，无需在此生成' } });
+  }
   const content = docker.renderCompose({
     containerName: req.query.name || undefined,
     voicePort: num(req.query.voice, 9987),
@@ -78,9 +83,12 @@ router.get('/preview', (req, res) => {
   res.json({ ok: true, data: { content } });
 });
 
-// ---------- 生成 compose ----------
+// ---------- 生成 compose（容器化模式下不适用） ----------
 router.post('/compose', async (req, res, next) => {
   try {
+    if (config.runMode === 'container') {
+      throw Object.assign(new Error('容器化模式下 docker-compose.yml 由项目根目录管理，无需在此生成'), { status: 400 });
+    }
     const b = req.body || {};
     const result = await docker.saveComposeFile({
       containerName: b.name || undefined,
@@ -95,27 +103,37 @@ router.post('/compose', async (req, res, next) => {
 });
 
 // ---------- 启动 / 停止 / 重启 ----------
+// 容器化模式：直接操作 TS6 容器（由根目录 compose 创建）；独立模式：compose 任务
 router.post('/up', async (req, res, next) => {
   try {
-    if (!fs.existsSync(docker.composeFilePath())) {
-      throw Object.assign(new Error('尚未生成 docker-compose.yml，请先在「部署配置」中生成'), { status: 400 });
+    let taskId;
+    if (config.runMode === 'container') {
+      taskId = docker.runTask('container-start', 'docker', ['start', config.tsContainerName]);
+    } else {
+      if (!fs.existsSync(docker.composeFilePath())) {
+        throw Object.assign(new Error('尚未生成 docker-compose.yml，请先在「部署配置」中生成'), { status: 400 });
+      }
+      taskId = await docker.composeTask('compose-up', ['up', '-d']);
     }
-    const taskId = await docker.composeTask('compose-up', ['up', '-d']);
-    res.json({ ok: true, data: { taskId } });
+    res.json({ ok: true, data: { taskId, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
 router.post('/down', async (req, res, next) => {
   try {
-    const taskId = await docker.composeTask('compose-down', ['down']);
-    res.json({ ok: true, data: { taskId } });
+    const taskId = config.runMode === 'container'
+      ? docker.runTask('container-stop', 'docker', ['stop', config.tsContainerName])
+      : await docker.composeTask('compose-down', ['down']);
+    res.json({ ok: true, data: { taskId, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
 router.post('/restart', async (req, res, next) => {
   try {
-    const taskId = await docker.composeTask('compose-restart', ['restart']);
-    res.json({ ok: true, data: { taskId } });
+    const taskId = config.runMode === 'container'
+      ? docker.runTask('container-restart', 'docker', ['restart', config.tsContainerName])
+      : await docker.composeTask('compose-restart', ['restart']);
+    res.json({ ok: true, data: { taskId, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
@@ -129,7 +147,7 @@ router.get('/task/:id', (req, res) => {
 // ---------- 容器日志 ----------
 router.get('/logs', async (req, res, next) => {
   try {
-    const name = req.query.name || 'teamspeak-server';
+    const name = req.query.name || config.tsContainerName;
     const log = await docker.containerLogs(name, num(req.query.tail, 300));
     res.json({ ok: true, data: { name, log } });
   } catch (err) { next(err); }
@@ -138,7 +156,7 @@ router.get('/logs', async (req, res, next) => {
 // ---------- 初始管理员凭证 ----------
 router.get('/credentials', async (req, res, next) => {
   try {
-    const name = req.query.name || 'teamspeak-server';
+    const name = req.query.name || config.tsContainerName;
     const log = await docker.containerLogs(name, 2000);
     const lines = docker.extractCredentials(log);
     res.json({ ok: true, data: { found: lines.length > 0, lines, note: lines.length ? null : '日志中未发现凭证关键字，可查看完整日志确认' } });
