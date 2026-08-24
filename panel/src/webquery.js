@@ -43,7 +43,13 @@ function cleanParams(params) {
   if (!params) return undefined;
   const out = {};
   for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== null && v !== '') out[k] = v;
+    if (v === undefined || v === null) continue;
+    // flag 参数（如 -uid、-times）以空字符串传值，必须保留并发送（TS6 据此返回扩展字段）
+    if (k.startsWith('-')) {
+      out[k] = '';
+      continue;
+    }
+    if (v !== '') out[k] = v;
   }
   return Object.keys(out).length ? out : undefined;
 }

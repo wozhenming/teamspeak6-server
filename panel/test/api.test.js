@@ -79,6 +79,14 @@ async function login() {
   j = await r.json();
   await check('clientlist 200', r.status === 200 && j.ok);
   await check('用户数=3', j.data && j.data.clients.length === 3);
+  // 关键回归：clientlist 必须带 -uid/-times/-info/-country 等 flag，字段才完整
+  const alice = j.data && j.data.clients.find((c) => c.nickname === 'Alice');
+  await check('UID 字段', alice && alice.uid === 'uid-alice-001', alice);
+  await check('国家字段', alice && alice.country === 'CN', alice);
+  await check('Ping 字段', alice && alice.ping === 21, alice);
+  await check('连接时长字段', alice && alice.connected_seconds === 3600, alice);
+  await check('空闲字段', alice && alice.idle_seconds === 120, alice);
+  await check('频道名字段', alice && alice.channel_name === 'Lobby', alice);
 
   r = await fetch(`${BASE}/api/servers/1/clients/1/kick`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'test', from: 'server' }) });
   j = await r.json();

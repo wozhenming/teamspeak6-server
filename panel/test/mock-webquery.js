@@ -86,15 +86,37 @@ const server = http.createServer((req, res) => {
     case 'serverrequestconnectioninfo':
       body = ok([{ connection_bandwidth_sent_last_second_total: 2048, connection_bandwidth_received_last_second_total: 1024 }]);
       break;
-    case 'clientlist':
-      body = ok(clients);
+    case 'clientlist': {
+      // 模拟真实 TS6：带 flag 参数才返回扩展字段（uid/国家/时长/空闲等）
+      const hasFlags = Object.keys(params).some((k) => k.startsWith('-'));
+      if (hasFlags) {
+        body = ok(clients);
+      } else {
+        body = ok(clients.map((c) => ({
+          clid: String(c.clid), cid: String(c.cid),
+          client_database_id: String(c.clid),
+          client_nickname: c.client_nickname, client_type: c.client_type,
+        })));
+      }
       break;
+    }
     case 'clientinfo':
       body = ok([{ ...clients[0], connection_client_ip: '203.0.113.7' }]);
       break;
-    case 'channellist':
-      body = ok(channels);
+    case 'channellist': {
+      // 模拟真实 TS6：带 flag 参数才返回密码/主题等扩展字段
+      const hasFlags = Object.keys(params).some((k) => k.startsWith('-'));
+      if (hasFlags) {
+        body = ok(channels);
+      } else {
+        body = ok(channels.map((ch) => ({
+          cid: String(ch.cid), pid: String(ch.pid),
+          channel_name: ch.channel_name, channel_order: String(ch.channel_order),
+          total_clients: String(ch.total_clients),
+        })));
+      }
       break;
+    }
     case 'channelcreate':
       channelSeq += 1;
       body = ok([{ cid: channelSeq }]);
