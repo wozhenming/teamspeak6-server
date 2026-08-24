@@ -16,6 +16,13 @@ const { ts } = require('../webquery');
 
 const router = express.Router();
 
+/** TS6 /version 返回数组 [{build,platform,version}]，兼容对象/数组两种结构 */
+function pickVersion(v) {
+  if (!v) return null;
+  const item = Array.isArray(v) ? v[0] : v;
+  return (item && item.version) || null;
+}
+
 // 带宽采样兜底：若 last_second 字段缺失，用计数器差值计算速率
 let lastSample = { at: 0, sent: 0, received: 0 };
 
@@ -100,7 +107,7 @@ router.get('/', async (req, res, next) => {
         ok: true,
         data: {
           connected: false,
-          version: version ? version.version : null,
+          version: pickVersion(version),
           server: null,
           clients: [],
           channels: [],
@@ -134,7 +141,7 @@ router.get('/', async (req, res, next) => {
       ok: true,
       data: {
         connected: true,
-        version: version ? version.version : null,
+        version: pickVersion(version),
         server: {
           id: sid,
           name: server.virtualserver_name,
@@ -146,8 +153,12 @@ router.get('/', async (req, res, next) => {
           packetloss: Number(server.virtualserver_total_packetloss_total || 0),
           ping: Number(server.virtualserver_total_ping || 0),
           created_at: Number(server.virtualserver_created || 0),
-          bandwidth_sent: Number(server.connection_bandwidth_sent || 0),
-          bandwidth_received: Number(server.connection_bandwidth_received || 0),
+          // 累计字节/包：TS6 字段为 connection_bytes_*_total（会话级）与
+          // virtualserver_total_bytes_*（服务器级累计），兼容两种
+          bandwidth_sent: Number(server.connection_bytes_sent_total != null ? server.connection_bytes_sent_total : server.virtualserver_total_bytes_uploaded || 0),
+          bandwidth_received: Number(server.connection_bytes_received_total != null ? server.connection_bytes_received_total : server.virtualserver_total_bytes_downloaded || 0),
+          packets_sent: Number(server.connection_packets_sent_total || 0),
+          packets_received: Number(server.connection_packets_received_total || 0),
         },
         bandwidth_sent_rate: sentRate,
         bandwidth_received_rate: receivedRate,

@@ -168,7 +168,7 @@ async function login() {
 
   r = await fetch(`${BASE}/api/deploy/check`, { headers: H });
   j = await r.json();
-  await check('连接检测成功', r.status === 200 && j.ok && j.data.reachable === true && j.data.version === '6.0.0-beta.5', j.data);
+  await check('连接检测成功', r.status === 200 && j.ok && j.data.reachable === true && j.data.version === '6.0.0-beta12.1', j.data);
 
   // 结束时恢复 mock 用的 Key（保证与其他测试套件按任意顺序运行都能通过）
   await fetch(`${BASE}/api/deploy/apikey`, {

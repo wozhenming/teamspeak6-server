@@ -46,9 +46,13 @@ async function login() {
   let j = await r.json();
   await check('overview 200', r.status === 200 && j.ok, j);
   await check('connected=true', j.data && j.data.connected === true);
+  await check('WebQuery 版本显示', j.data && j.data.version === '6.0.0-beta12.1', j.data && j.data.version);
   await check('server 名称', j.data && j.data.server && j.data.server.name === 'Test Server');
   await check('在线用户数=2', j.data && j.data.server && j.data.server.clients_online === 2);
   await check('运行时长=86400', j.data && j.data.server && j.data.server.uptime_seconds === 86400);
+  await check('累计发送字节', j.data && j.data.server && j.data.server.bandwidth_sent === 100000000, j.data && j.data.server);
+  await check('累计接收字节', j.data && j.data.server && j.data.server.bandwidth_received === 50000000, j.data && j.data.server);
+  await check('累计数据包', j.data && j.data.server && j.data.server.packets_sent === 1234 && j.data.server.packets_received === 5678, j.data && j.data.server);
   await check('上行速率=16.384 Kbit/s', Math.abs(j.data.bandwidth_sent_rate - 2048 * 8 / 1000) < 0.01, j.data.bandwidth_sent_rate);
   await check('下行速率=8.192 Kbit/s', Math.abs(j.data.bandwidth_received_rate - 1024 * 8 / 1000) < 0.01, j.data.bandwidth_received_rate);
   await check('客户端含频道名', j.data.clients.length === 3 && j.data.clients[0].channel_name === 'Lobby', j.data.clients);

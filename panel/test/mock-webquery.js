@@ -67,7 +67,8 @@ const server = http.createServer((req, res) => {
   let body;
   switch (command) {
     case 'version':
-      body = ok({ version: '6.0.0-beta.5', platform: 'Linux' });
+      // 与真实 TS6 一致：body 为数组
+      body = ok([{ build: '1785239375', platform: 'Linux', version: '6.0.0-beta12.1' }]);
       break;
     case 'whoami':
       body = ok({ whoami: { id: 1, client_login_name: 'serveradmin', client_unique_identifier: 'serveradmin' } });
@@ -81,7 +82,9 @@ const server = http.createServer((req, res) => {
         virtualserver_version: '6.0.0-beta.5', virtualserver_clientsonline: 2, virtualserver_maxclients: 32,
         virtualserver_uptime: 86400, virtualserver_created: 1700000000,
         virtualserver_total_packetloss_total: 0.12, virtualserver_total_ping: 25,
-        connection_bandwidth_sent: 100000000, connection_bandwidth_received: 50000000 }]);
+        // 与真实 TS6 一致的累计字段
+        connection_bytes_sent_total: 100000000, connection_bytes_received_total: 50000000,
+        connection_packets_sent_total: 1234, connection_packets_received_total: 5678 }]);
       break;
     case 'serverrequestconnectioninfo':
       body = ok([{ connection_bandwidth_sent_last_second_total: 2048, connection_bandwidth_received_last_second_total: 1024 }]);

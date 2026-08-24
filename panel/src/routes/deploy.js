@@ -287,7 +287,9 @@ router.post('/apikey/generate', async (req, res, next) => {
 router.get('/check', async (req, res, next) => {
   try {
     const v = await ts.version();
-    res.json({ ok: true, data: { reachable: true, version: v.version || v, baseUrl: config.tsBaseUrl, keyConfigured: !!config.tsApiKey } });
+    // TS6 /version 返回数组 [{build,platform,version}]，取 version 字段展示
+    const item = Array.isArray(v) ? v[0] : v;
+    res.json({ ok: true, data: { reachable: true, version: (item && item.version) || v, baseUrl: config.tsBaseUrl, keyConfigured: !!config.tsApiKey } });
   } catch (err) {
     res.status(502).json({ ok: false, error: { code: err.code || 'WEBQUERY_UNREACHABLE', message: err.message } });
   }

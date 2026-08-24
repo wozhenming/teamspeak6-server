@@ -30,10 +30,10 @@ TSPages.dashboard = async function () {
       <div class="card stat-card"><span class="stat-label">当前下行带宽</span><span class="stat-value" id="st-down">-</span><span class="stat-sub">接收速率</span></div>
     </div>
     <div class="grid grid-2" style="margin-top:16px">
-      <div class="card"><h3>在线人数趋势
+      <div class="card"><h3><span>在线人数趋势</span>
         <span class="range-btns" id="range-btns"></span>
       </h3><div class="chart-box"><canvas id="chart-clients"></canvas></div></div>
-      <div class="card"><h3>带宽使用（近 <span id="range-label">1 小时</span>）</h3><div class="chart-box"><canvas id="chart-bandwidth"></canvas></div></div>
+      <div class="card"><h3><span>带宽使用<span class="muted">（近 <span id="range-label">1 小时</span>）</span></span></h3><div class="chart-box"><canvas id="chart-bandwidth"></canvas></div></div>
     </div>
     <div class="grid grid-2" style="margin-top:16px">
       <div class="card">
@@ -72,7 +72,8 @@ TSPages.dashboard = async function () {
           fill: true, tension: .3, pointRadius: 0, spanGaps: true,
         }],
       },
-      options: { animation: false, plugins: { legend: { display: false } },
+      options: { animation: false, maintainAspectRatio: false, responsive: true,
+        plugins: { legend: { display: false } },
         scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } }, y: { beginAtZero: true, ticks: { precision: 0 } } } },
     });
     bandwidthChart = new Chart(document.getElementById('chart-bandwidth'), {
@@ -84,7 +85,7 @@ TSPages.dashboard = async function () {
           { label: '下行 Kbit/s', data: [], borderColor: '#f1c40f', tension: .3, pointRadius: 0, spanGaps: true },
         ],
       },
-      options: { animation: false,
+      options: { animation: false, maintainAspectRatio: false, responsive: true,
         scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } }, y: { beginAtZero: true } } },
     });
   }
