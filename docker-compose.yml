@@ -20,12 +20,13 @@ services:
       - "${TS_PORT_VOICE:-9987}:9987/udp"      # 语音端口（必须）
       - "${TS_PORT_FILE:-30033}:30033/tcp"     # 文件传输端口
       - "127.0.0.1:${TS_PORT_WEBQUERY:-10080}:10080/tcp"  # WebQuery HTTP API（面板经内网访问；如需远程管理去掉 127.0.0.1:）
-      - "127.0.0.1:${TS_PORT_SSHQUERY:-10022}:10022/tcp"  # SSH Query（生成 API Key 用；同上）
+      - "${TS_PORT_SSHQUERY:-10022}:10022/tcp" # SSH Query（生成 API Key 用；可改为 127.0.0.1: 仅本机）
     environment:
       - TSSERVER_LICENSE_ACCEPTED=${TS_LICENSE_ACCEPTED:-accept}
       - TSSERVER_QUERY_HTTP_ENABLED=true   # 启用 WebQuery HTTP API（管理面板必需，默认禁用）
       - TSSERVER_QUERY_SSH_ENABLED=true    # 启用 SSH Query（API Key 生成必需，默认禁用）
       - TSSERVER_QUERY_ALLOW_LIST=/etc/tsserver/query_ip_allowlist.txt  # Query 接口 IP 白名单
+      # ⚠️ 远程连接 SSH Query 时，记得把来源 IP 加入 query_ip_allowlist.txt 并重启 teamspeak 容器
       # 覆盖默认 Query 管理员密码（可选）：
       # - TSSERVER_QUERY_ADMIN_PASSWORD=your_password
     volumes:

@@ -28,10 +28,10 @@ TSPages.deploy = async function () {
         <div style="margin-top:12px" class="muted" id="env-guide"></div>
       </div>
 
-      <!-- ② 部署配置（独立模式） -->
+      <!-- ② 部署配置（独立模式为表单；容器化模式为说明） -->
       <div class="card" id="card-config">
         <h3><span class="step-badge">2</span> 部署配置</h3>
-        <div class="deploy-form">
+        <div class="deploy-form" id="config-form">
           <div class="form-row">
             <label>容器名<input type="text" id="cfg-name" value="teamspeak-server"></label>
             <label>语音端口 (UDP)<input type="number" id="cfg-voice" value="9987"></label>
@@ -51,6 +51,7 @@ TSPages.deploy = async function () {
           </div>
           <div class="muted" id="compose-file-info" style="font-size:12px"></div>
         </div>
+        <div id="config-note" hidden></div>
       </div>
     </div>
 
@@ -90,6 +91,15 @@ TSPages.deploy = async function () {
         <code>apikeyadd scope=manage lifetime=0</code>
         <button class="btn btn-sm" data-copy="apikeyadd scope=manage lifetime=0">复制</button>
       </div>
+      <div class="muted" style="font-size:12.5px;line-height:1.8">
+        💡 <b>连接被拒绝（Connection refused）？</b>说明 SSH Query 端口只绑定了服务器本机。两种处理：
+        <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 admin@127.0.0.1</code>
+        <br>② 允许远程连接：编辑服务器上 <code class="mono">docker-compose.yml</code>，把 10022 端口行
+        <code class="mono">127.0.0.1:\${TS_PORT_SSHQUERY:-10022}</code> 改为 <code class="mono">\${TS_PORT_SSHQUERY:-10022}</code>，
+        执行 <code class="mono">docker compose up -d</code>；再把你的公网 IP
+        （<code class="mono">curl ifconfig.me</code> 查看）加入 <code class="mono">query_ip_allowlist.txt</code>，
+        最后 <code class="mono">docker compose restart teamspeak</code>
+      </div>
       <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
         <input type="text" id="apikey-input" class="input" style="flex:1;min-width:260px" placeholder="粘贴生成的 API Key 后保存（无需重启面板）">
         <button class="btn btn-primary" id="btn-save-key">保存</button>
@@ -114,10 +124,7 @@ TSPages.deploy = async function () {
   }
 
   function copyText(text) {
-    navigator.clipboard.writeText(text).then(
-      () => TSUtils.toast('已复制', 'success'),
-      () => TSUtils.toast('复制失败，请手动选择复制', 'error')
-    );
+    TSUtils.copyText(text);
   }
 
   function setTerm(el, lines, emptyText) {
@@ -151,19 +158,32 @@ TSPages.deploy = async function () {
   function renderMode() {
     const isContainer = status && status.mode === 'container';
     const banner = $('mode-banner');
-    const configCard = $('card-config');
+    const configForm = $('config-form');
+    const configNote = $('config-note');
 
     if (isContainer) {
       banner.innerHTML = `<div class="alert">🧊 容器化模式：TS6 服务器与本面板由项目根目录 <b>docker-compose.yml</b> 统一管理
         （docker compose up -d 启动）。本页提供初始凭证提取、API Key 配置、日志查看与 TS6 容器快捷启停。</div>`;
-      if (configCard) configCard.hidden = true;
+      // ② 不消失：显示为说明卡片（端口/密码等由根目录 compose 管理）
+      if (configForm) configForm.hidden = true;
+      if (configNote) {
+        configNote.hidden = false;
+        configNote.innerHTML = `
+          <div class="alert" style="margin-bottom:10px">当前由项目根目录 <b>docker-compose.yml</b> 统一管理，无需在此配置。
+            常用调整在服务器上完成：</div>
+          <div class="cmd-box"><code>nano docker-compose.yml        # 端口映射、环境变量</code></div>
+          <div class="cmd-box"><code>cp .env.example .env && nano .env   # 面板密码/端口</code></div>
+          <div class="cmd-box"><code>docker compose up -d          # 应用修改</code></div>
+          <div class="muted" style="font-size:12px;margin-top:6px">修改后到 ① 环境检测 点「刷新状态」即可看到新配置生效。</div>`;
+      }
       $('btn-up').innerHTML = '▶ 启动 TS6 容器';
       $('btn-up').title = 'docker start teamspeak-server';
       $('btn-restart').innerHTML = '重启容器';
       $('btn-down').innerHTML = '停止容器';
     } else {
       banner.innerHTML = '';
-      if (configCard) configCard.hidden = false;
+      if (configForm) configForm.hidden = false;
+      if (configNote) configNote.hidden = true;
       $('btn-up').innerHTML = '🚀 启动服务（docker compose up -d）';
       $('btn-up').title = '';
       $('btn-restart').innerHTML = '重启';

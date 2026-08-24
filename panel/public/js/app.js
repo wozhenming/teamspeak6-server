@@ -91,6 +91,42 @@
         try { await onOk(); close(); } catch (e) { TSUtils.toast(e.message, 'error'); okBtn.disabled = false; }
       };
     },
+
+    /**
+     * 复制文本到剪贴板。
+     * navigator.clipboard 仅在 HTTPS/localhost 可用（HTTP 部署下为 undefined），
+     * 自动降级到 execCommand 方案。
+     */
+    copyText(text) {
+      const value = String(text == null ? '' : text);
+      const done = () => TSUtils.toast('已复制', 'success');
+      const fail = () => TSUtils.toast('复制失败，请手动选择复制', 'error');
+
+      const legacyCopy = () => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = value;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-9999px';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          ta.setSelectionRange(0, value.length);
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          ok ? done() : fail();
+        } catch (e) {
+          fail();
+        }
+      };
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).then(done, legacyCopy);
+      } else {
+        legacyCopy();
+      }
+    },
   };
 
   // ---------- 导航 ----------

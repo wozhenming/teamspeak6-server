@@ -3,6 +3,8 @@
 # 每行一个 IP 或 CIDR（支持 IPv4/IPv6）。
 #
 # 默认包含本机与常见内网/Docker 网段；按需增删。
+# 远程管理（如从自己电脑 SSH 生成 API Key）：先 curl ifconfig.me 查看你的
+# 公网 IP，加入本文件，然后执行：docker compose restart teamspeak
 # 注意：如果改动了本文件，需要重启 teamspeak 容器生效：
 #   docker compose restart teamspeak
 
