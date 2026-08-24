@@ -26,6 +26,19 @@ async function check(name, cond, extra) {
   }
 }
 
+// ---------- 空闲时长平滑单元验证 ----------
+async function testIdleSmoothing() {
+  const { smoothIdle } = require('../src/routes/clients');
+  const CLID = 999001;
+  const s1 = smoothIdle(CLID, 100);            // 首次：直接展示 100
+  await check('空闲首次展示', s1 === 100, s1);
+  await new Promise((r) => setTimeout(r, 1100)); // 真实流逝 ~1.1s
+  const s2 = smoothIdle(CLID, 100 + 3600);     // 快照跳变 +3600 → 应平滑为 ~101
+  await check('快照跳变平滑', Math.abs(s2 - 101) <= 1, s2);
+  const s3 = smoothIdle(CLID, 50);             // 用户活动重置 → 直接展示 50
+  await check('活动重置直接展示', s3 === 50, s3);
+}
+
 async function login() {
   const r = await fetch(`${BASE}/api/login`, {
     method: 'POST',
@@ -37,6 +50,10 @@ async function login() {
 }
 
 (async () => {
+  // 空闲平滑单元验证（不依赖面板服务）
+  console.log('\n[空闲平滑]');
+  await testIdleSmoothing();
+
   const cookie = await login();
   const H = { cookie };
 

@@ -19,9 +19,38 @@ function sidOf(req) {
   return parseInt(req.params.sid, 10) || 1;
 }
 
+// ---------- 空闲时长平滑 ----------
+// 实测：TS6 的 client_idle_time 为周期性快照（约每 50 分钟刷新一次），
+// 两次请求间可能凭空跳变数十分钟。为避免用户表显示跳变，做平滑：
+//  - 未重置（raw >= 上次值）：展示 min(raw, 上次值 + 真实流逝时间)
+//  - 已重置（raw < 上次值，用户活动了）：直接展示 raw
+const idleCache = new Map(); // clid -> { value, at }
+
+function smoothIdle(clid, raw) {
+  const now = Date.now();
+  if (raw == null || raw === '') {
+    idleCache.delete(clid);
+    return null;
+  }
+  const seconds = Number(raw);
+  const prev = idleCache.get(clid);
+  if (prev && seconds >= prev.value) {
+    const estimated = prev.value + Math.floor((now - prev.at) / 1000);
+    const shown = Math.min(seconds, estimated);
+    idleCache.set(clid, { value: shown, at: now });
+    return shown;
+  }
+  idleCache.set(clid, { value: seconds, at: now });
+  return seconds;
+}
+
 function mapClient(c, info) {
+  const clid = Number(c.clid);
+  const rawIdle = (info && info.client_idle_time != null)
+    ? info.client_idle_time
+    : (c.client_idle_time != null ? c.client_idle_time : null);
   return {
-    clid: Number(c.clid),
+    clid,
     cid: Number(c.cid),
     nickname: c.client_nickname || '?',
     uid: c.client_unique_identifier || '',
@@ -30,9 +59,7 @@ function mapClient(c, info) {
     connected_seconds: (info && info.connection_connected_time != null)
       ? info.connection_connected_time
       : (c.client_connected_time != null ? c.client_connected_time : (c.connection_connected_time != null ? c.connection_connected_time : null)),
-    idle_seconds: (info && info.client_idle_time != null)
-      ? info.client_idle_time
-      : (c.client_idle_time != null ? c.client_idle_time : null),
+    idle_seconds: smoothIdle(clid, rawIdle),
     away: c.client_away === 1 || c.client_away === '1',
     is_query: String(c.client_type) === '1',
   };
@@ -114,3 +141,4 @@ router.post('/:clid/message', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.smoothIdle = smoothIdle; // 供单元测试

@@ -235,29 +235,40 @@
   }
 
   // ---------- 启动 ----------
-  window.addEventListener('hashchange', navigate);
-  document.getElementById('logout-btn').onclick = async () => {
-    try { await API.logout(); } catch (e) { /* 忽略 */ }
-    location.href = '/login.html';
-  };
-  document.getElementById('server-select').onchange = (e) => {
-    currentSid = e.target.value;
-    navigate();
-    refreshConnStatus();
-  };
-
-  (async function boot() {
-    initTheme();
-    try {
-      const me = await API.me();
-      document.getElementById('current-user').textContent = me.username;
-    } catch (e) {
+  // 竞态防护：boot 必须等所有同步脚本（deploy/dashboard/users/channels.js）
+  // 执行完毕（DOMContentLoaded 触发时同步脚本必然已执行），否则快速刷新时
+  // /api/me 先返回、页面脚本后下载，会报 "TSPages.xxx is not a function"
+  function start() {
+    window.addEventListener('hashchange', navigate);
+    document.getElementById('logout-btn').onclick = async () => {
+      try { await API.logout(); } catch (e) { /* 忽略 */ }
       location.href = '/login.html';
-      return;
-    }
-    await loadServers();
-    await navigate();
-    await refreshConnStatus();
-    setInterval(refreshConnStatus, 15000);
-  })();
+    };
+    document.getElementById('server-select').onchange = (e) => {
+      currentSid = e.target.value;
+      navigate();
+      refreshConnStatus();
+    };
+
+    (async function boot() {
+      initTheme();
+      try {
+        const me = await API.me();
+        document.getElementById('current-user').textContent = me.username;
+      } catch (e) {
+        location.href = '/login.html';
+        return;
+      }
+      await loadServers();
+      await navigate();
+      await refreshConnStatus();
+      setInterval(refreshConnStatus, 15000);
+    })();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
 })();
