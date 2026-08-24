@@ -1,4 +1,6 @@
 node_modules/
+.npm-cache/
 .env
 *.log
 ts6-boot.log
+ts6-credentials.txt

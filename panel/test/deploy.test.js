@@ -141,6 +141,17 @@ async function login() {
   await check('credentials 200', r.status === 200 && j.ok);
   await check('字段完整', j.data && typeof j.data.found === 'boolean' && Array.isArray(j.data.lines));
 
+  // 凭证持久化：写入副本后应直接读取（source=saved）
+  const credFile = path.join(__dirname, '..', 'ts6-credentials.txt');
+  fs.writeFileSync(credFile, 'ServerAdmin privilege key: test-token-123\npassword= "test-pass"\n', 'utf8');
+  r = await fetch(`${BASE}/api/deploy/credentials`, { headers: H });
+  j = await r.json();
+  await check('持久化凭证读取', r.status === 200 && j.ok && j.data.found === true && j.data.source === 'saved' && j.data.lines.length === 2, j.data);
+  fs.rmSync(credFile, { force: true });
+  r = await fetch(`${BASE}/api/deploy/credentials`, { headers: H });
+  j = await r.json();
+  await check('删除副本后恢复', r.status === 200 && j.ok && j.data.found === false, j.data);
+
   // ---------- 日志 ----------
   r = await fetch(`${BASE}/api/deploy/logs?tail=100`, { headers: H });
   j = await r.json();

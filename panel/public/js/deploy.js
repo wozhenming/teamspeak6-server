@@ -72,9 +72,9 @@ TSPages.deploy = async function () {
     <!-- ④ 初始管理员凭证 -->
     <div class="card" style="margin-top:16px">
       <h3><span class="step-badge">4</span> 初始管理员凭证
-        <button class="btn btn-sm" id="btn-credentials">重新提取</button>
+        <button class="btn btn-sm" id="btn-credentials">查看 / 重新提取</button>
       </h3>
-      <div id="credentials-box"><div class="empty">启动服务后点击「提取凭证」，或先手动查看日志</div></div>
+      <div id="credentials-box"><div class="empty">凭证仅在首次启动生成，已自动保存到面板数据卷（容器重建不丢失）</div></div>
     </div>
 
     <!-- ⑤ API Key 配置 -->
@@ -95,18 +95,21 @@ TSPages.deploy = async function () {
         <code>apikeyadd scope=manage lifetime=0</code>
         <button class="btn btn-sm" data-copy="apikeyadd scope=manage lifetime=0">复制</button>
       </div>
-      <div class="muted" style="font-size:12.5px;line-height:1.8">
-        💡 <b>连接被拒绝（Connection refused）？</b>说明 SSH Query 端口只绑定了服务器本机。两种处理：
-        <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 serveradmin@127.0.0.1</code>
-        <br>② 允许远程连接：编辑服务器上 <code class="mono">docker-compose.yml</code>，把 10022 端口行
-        <code class="mono">127.0.0.1:\${TS_PORT_SSHQUERY:-10022}</code> 改为 <code class="mono">\${TS_PORT_SSHQUERY:-10022}</code>，
-        执行 <code class="mono">docker compose up -d</code>；再把你的公网 IP
-        （<code class="mono">curl ifconfig.me</code> 查看）加入 <code class="mono">query_ip_allowlist.txt</code>，
-        最后 <code class="mono">docker compose restart teamspeak</code>
-        <br>💡 <b>Permission denied？</b>SSH Query 登录用户名为 <b>serveradmin</b>（不是 admin），
-        密码为部署页 ④ 提取的密码，或 .env 中 <code class="mono">TS_QUERY_ADMIN_PASSWORD</code> 设置的值
-        （设置后需 <code class="mono">docker compose up -d teamspeak</code> 重建生效）。
-      </div>
+      <details class="hint-box">
+        <summary>❓ 连接问题排查（点击展开）</summary>
+        <div class="hint-body">
+          <b>连接被拒绝（Connection refused）？</b>说明 SSH Query 端口只绑定了服务器本机。两种处理：
+          <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 serveradmin@127.0.0.1</code>
+          <br>② 允许远程连接：编辑服务器上 <code class="mono">docker-compose.yml</code>，把 10022 端口行
+          <code class="mono">127.0.0.1:\${TS_PORT_SSHQUERY:-10022}</code> 改为 <code class="mono">\${TS_PORT_SSHQUERY:-10022}</code>，
+          执行 <code class="mono">docker compose up -d</code>；再把你的公网 IP
+          （<code class="mono">curl ifconfig.me</code> 查看）加入 <code class="mono">query_ip_allowlist.txt</code>，
+          最后 <code class="mono">docker compose restart teamspeak</code>
+          <br><b>Permission denied？</b>SSH Query 登录用户名为 <b>serveradmin</b>（不是 admin），
+          密码为上方 ④ 提取的密码，或 .env 中 <code class="mono">TS_QUERY_ADMIN_PASSWORD</code> 设置的值
+          （设置后需 <code class="mono">docker compose up -d teamspeak</code> 重建生效）。
+        </div>
+      </details>
       <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
         <input type="text" id="apikey-input" class="input" style="flex:1;min-width:260px" placeholder="粘贴生成的 API Key 后保存（无需重启面板）">
         <button class="btn btn-primary" id="btn-save-key">保存</button>
@@ -340,13 +343,18 @@ TSPages.deploy = async function () {
     try {
       const d = await API.deployCredentials();
       if (d.found) {
+        const sourceTag = d.source === 'saved' ? '<span class="badge green">已保存副本</span>'
+          : d.source === 'env' ? '<span class="badge blue">来自容器配置</span>'
+            : '<span class="badge yellow">已自动保存</span>';
         box.innerHTML = `
           <div class="cred-box">
             ${d.lines.map(l => `<div class="cred-line">${escape(l)}</div>`).join('')}
           </div>
-          <div class="muted" style="font-size:12px;margin-top:6px">请立即保存以上凭证；也可点击右上角「重新提取」或查看「服务器日志」。</div>`;
+          <div style="margin-top:8px">${sourceTag}
+            <span class="muted" style="font-size:12px">${escape(d.note || '')}</span>
+          </div>`;
       } else {
-        box.innerHTML = `<div class="empty">${escape(d.note || '未发现凭证')}</div>`;
+        box.innerHTML = `<div class="alert" style="margin:0">${escape(d.note || '未发现凭证')}</div>`;
       }
     } catch (e) {
       box.innerHTML = `<div class="empty">提取失败：${escape(e.message)}</div>`;

@@ -343,3 +343,23 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
   color: var(--green);
 }
 .cred-line { padding: 2px 0; word-break: break-all; }
+
+/* ---------- 折叠提示 ---------- */
+.hint-box {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 10px 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.hint-box summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  user-select: none;
+  outline: none;
+}
+.hint-box summary:hover { color: var(--text); }
+.hint-box[open] summary { margin-bottom: 8px; }
+.hint-body { line-height: 1.9; }
+.hint-body .mono { color: var(--text); }

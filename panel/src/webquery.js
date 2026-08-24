@@ -119,6 +119,7 @@ const ts = {
     const body = await get(sid, 'serverrequestconnectioninfo');
     return Array.isArray(body) ? body[0] || {} : body || {};
   },
+  editServer: (sid, opts) => get(sid, 'serveredit', opts),
 
   // ---------- 用户 ----------
   clientlist: (sid) => get(sid, 'clientlist', {

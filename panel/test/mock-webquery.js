@@ -99,6 +99,9 @@ const server = http.createServer((req, res) => {
       channelSeq += 1;
       body = ok([{ cid: channelSeq }]);
       break;
+    case 'serveredit':
+      body = ok([]);
+      break;
     case 'channeledit':
     case 'channeldelete':
     case 'clientkick':

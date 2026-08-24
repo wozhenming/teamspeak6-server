@@ -44,6 +44,7 @@ const API = (function () {
 
     overview: (sid) => request('GET', `/api/overview?sid=${encodeURIComponent(sid)}`),
     servers: () => request('GET', '/api/servers'),
+    editServer: (sid, name) => request('PUT', `/api/servers/${sid}`, { virtualserver_name: name }),
 
     // 用户管理
     clients: (sid) => request('GET', `/api/servers/${sid}/clients`),

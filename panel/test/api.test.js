@@ -63,6 +63,16 @@ async function login() {
   await check('serverlist 200', r.status === 200 && j.ok);
   await check('包含 Test Server', j.data && j.data.length === 1 && j.data[0].name === 'Test Server', j.data);
 
+  // ---------- 修改服务器名称 ----------
+  r = await fetch(`${BASE}/api/servers/1`, { method: 'PUT', headers: { ...H, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ virtualserver_name: 'My TeamSpeak' }) });
+  j = await r.json();
+  await check('serveredit 200', r.status === 200 && j.ok && j.data.edited && j.data.name === 'My TeamSpeak', j);
+
+  r = await fetch(`${BASE}/api/servers/1`, { method: 'PUT', headers: { ...H, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ virtualserver_name: '   ' }) });
+  await check('serveredit 空名 400', r.status === 400);
+
   // ---------- 用户管理 ----------
   console.log('\n[用户管理]');
   r = await fetch(`${BASE}/api/servers/1/clients`, { headers: H });

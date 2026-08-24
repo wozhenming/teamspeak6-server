@@ -166,16 +166,52 @@ router.get('/logs', async (req, res, next) => {
 });
 
 // ---------- 初始管理员凭证 ----------
-// 注意：凭证仅在容器首次启动时打印；若容器曾被重建（docker compose up 应用
-// 新配置），历史日志会被清空，此时应使用 TSSERVER_QUERY_ADMIN_PASSWORD 重置。
+// 凭证仅在容器首次启动打印；为避免容器重建（应用新配置）后丢失，
+// 首次提取到时自动持久化到面板数据卷，之后直接读取保存的副本。
+// 来源优先级：① 持久化文件 → ② 容器日志（提取后自动保存）→ ③ 容器环境变量密码
 router.get('/credentials', async (req, res, next) => {
   try {
     const name = req.query.name || config.tsContainerName;
+    const fs = require('fs');
+
+    // ① 持久化副本
+    if (fs.existsSync(config.credentialFile)) {
+      const saved = fs.readFileSync(config.credentialFile, 'utf8').trim();
+      const lines = saved.split('\n').filter(Boolean);
+      if (lines.length) {
+        return res.json({ ok: true, data: { found: true, lines, source: 'saved', note: '来自面板数据卷中保存的凭证副本（首次提取时自动保存，容器重建不丢失）' } });
+      }
+    }
+
+    // ② 容器日志（提取后自动保存）
     const log = isContainerMode()
       ? await dockerApi.containerLogs(name, 10000)
       : await docker.containerLogs(name, 10000);
-    const lines = docker.extractCredentials(log);
-    res.json({ ok: true, data: { found: lines.length > 0, lines, note: lines.length ? null : '日志中未发现凭证关键字，可查看完整日志确认' } });
+    let lines = docker.extractCredentials(log);
+    if (lines.length) {
+      try {
+        await fs.promises.writeFile(config.credentialFile, lines.join('\n') + '\n', 'utf8');
+      } catch (e) { /* 保存失败不影响返回 */ }
+      return res.json({ ok: true, data: { found: true, lines, source: 'log', note: '已自动保存到面板数据卷，容器重建后仍可查看' } });
+    }
+
+    // ③ 容器环境变量中的 serveradmin 密码（仅密码，无 token）
+    if (isContainerMode()) {
+      const env = await dockerApi.containerEnv(name);
+      if (env.TSSERVER_QUERY_ADMIN_PASSWORD) {
+        lines = [`Server Query Admin Account: loginname= "serveradmin", password= "${env.TSSERVER_QUERY_ADMIN_PASSWORD}"（来自容器环境变量 TSSERVER_QUERY_ADMIN_PASSWORD）`];
+        return res.json({ ok: true, data: { found: true, lines, source: 'env', note: 'serveradmin 密码来自容器环境变量；ServerAdmin token 无法恢复（需重建虚拟服务器）' } });
+      }
+    }
+
+    res.json({
+      ok: true,
+      data: {
+        found: false,
+        lines: [],
+        note: '未找到凭证：容器首次启动的日志已随重建丢失。可在服务器 .env 设置 TS_QUERY_ADMIN_PASSWORD 后执行 docker compose up -d teamspeak，即可用该密码登录 SSH Query（也可用页面「⚡ 一键生成 API Key」）。',
+      },
+    });
   } catch (err) { next(err); }
 });
 

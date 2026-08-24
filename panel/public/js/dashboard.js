@@ -23,7 +23,9 @@ TSPages.dashboard = async function () {
     </div>
     <div class="grid grid-2" style="margin-top:16px">
       <div class="card">
-        <h3>服务器信息</h3>
+        <h3>服务器信息
+          <button class="btn btn-sm" id="btn-edit-server">✏️ 修改名称</button>
+        </h3>
         <div id="server-info"><div class="empty">加载中…</div></div>
       </div>
       <div class="card">
@@ -139,6 +141,77 @@ TSPages.dashboard = async function () {
         `<div class="alert error">${TSUtils.escapeHtml(e.message)}</div>`);
     }
   }
+
+  async function tick(initial) {
+    try {
+      const ov = await API.overview(sid);
+      if (ov.error) {
+        document.getElementById('stat-cards').insertAdjacentHTML('beforebegin',
+          `<div class="alert error">WebQuery 返回错误：${TSUtils.escapeHtml(ov.error)}</div>`);
+        return;
+      }
+      if (initial) {
+        renderServerInfo(ov);
+        renderRecentClients(ov);
+      }
+      updateStats(ov);
+      updateCharts(ov, Date.now());
+    } catch (e) {
+      document.getElementById('stat-cards').insertAdjacentHTML('beforebegin',
+        `<div class="alert error">${TSUtils.escapeHtml(e.message)}</div>`);
+    }
+  }
+
+  // ---------- 修改服务器名称 ----------
+  document.getElementById('btn-edit-server').onclick = async () => {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '修改服务器名称';
+    const body = document.getElementById('modal-body');
+    // 取当前名称（从服务器信息表或 overview 缓存）
+    let current = '';
+    try {
+      const ov = await API.overview(sid);
+      current = (ov.server && ov.server.name) || '';
+    } catch (e) { /* 忽略，空默认值 */ }
+    body.innerHTML = `
+      <label>新名称
+        <input type="text" id="srv-name" class="input" style="width:100%;margin-top:5px"
+          value="${TSUtils.escapeHtml(current)}" maxlength="100">
+      </label>
+      <div class="muted" style="font-size:12.5px">修改后所有客户端看到的服务器名称立即更新。</div>
+      <div class="modal-footer">
+        <button class="btn" id="srv-cancel">取消</button>
+        <button class="btn btn-primary" id="srv-ok">保存</button>
+      </div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    body.querySelector('#srv-cancel').onclick = close;
+    document.getElementById('modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    body.querySelector('#srv-ok').onclick = async () => {
+      const name = body.querySelector('#srv-name').value.trim();
+      if (!name) { TSUtils.toast('名称不能为空', 'error'); return; }
+      const btn = body.querySelector('#srv-ok');
+      btn.disabled = true;
+      try {
+        await API.editServer(sid, name);
+        close();
+        TSUtils.toast('服务器名称已更新', 'success');
+        // 刷新信息卡片与侧边栏状态栏
+        await tick(true);
+        const box = document.getElementById('conn-status');
+        if (box) {
+          box.classList.add('online');
+          document.getElementById('conn-status-text').textContent = `已连接 · ${name}`;
+        }
+      } catch (e) {
+        TSUtils.toast(e.message, 'error');
+        btn.disabled = false;
+      }
+    };
+    body.querySelector('#srv-name').focus();
+    body.querySelector('#srv-name').select();
+  };
 
   await tick(true);
   const timer = setInterval(() => tick(false), 5000);
