@@ -21,8 +21,11 @@ const fs = require('fs');
 const { config, setApiKey } = require('../config');
 const { ts } = require('../webquery');
 const docker = require('../docker');
+const dockerApi = require('../docker-api');
 
 const router = express.Router();
+
+const isContainerMode = () => config.runMode === 'container';
 
 function num(v, fallback) {
   const n = parseInt(v, 10);
@@ -34,8 +37,8 @@ router.get('/status', async (req, res, next) => {
   try {
     const containerName = req.query.name || config.tsContainerName;
     const [env, container, composeFile, wq] = await Promise.all([
-      docker.detectDocker(),
-      docker.containerStatus(containerName),
+      isContainerMode() ? dockerApi.detect() : docker.detectDocker(),
+      isContainerMode() ? dockerApi.containerStatus(containerName) : docker.containerStatus(containerName),
       docker.composeFilePath(),
       ts.version().then((v) => ({ reachable: true, version: v.version || v })).catch((e) => ({ reachable: false, error: e.message })),
     ]);
@@ -103,37 +106,44 @@ router.post('/compose', async (req, res, next) => {
 });
 
 // ---------- 启动 / 停止 / 重启 ----------
-// 容器化模式：直接操作 TS6 容器（由根目录 compose 创建）；独立模式：compose 任务
+// 容器化模式：经 docker.sock 直接操作 TS6 容器（由根目录 compose 创建），即时返回；
+// 独立模式：compose 后台任务（返回 taskId 供轮询）
+const CONTAINER_ACTIONS = { up: 'start', down: 'stop', restart: 'restart' };
+
+async function containerActionOrComposeTask(action) {
+  if (isContainerMode()) {
+    const result = await dockerApi.containerAction(config.tsContainerName, CONTAINER_ACTIONS[action]);
+    if (!result.ok) {
+      throw Object.assign(new Error(`容器操作失败：${result.error}`), { status: 502 });
+    }
+    return { taskId: null, action, success: true };
+  }
+  const taskMap = { up: ['up', '-d'], down: ['down'], restart: ['restart'] };
+  if (action === 'up' && !fs.existsSync(docker.composeFilePath())) {
+    throw Object.assign(new Error('尚未生成 docker-compose.yml，请先在「部署配置」中生成'), { status: 400 });
+  }
+  const taskId = await docker.composeTask(`compose-${action}`, taskMap[action]);
+  return { taskId, action };
+}
+
 router.post('/up', async (req, res, next) => {
   try {
-    let taskId;
-    if (config.runMode === 'container') {
-      taskId = docker.runTask('container-start', 'docker', ['start', config.tsContainerName]);
-    } else {
-      if (!fs.existsSync(docker.composeFilePath())) {
-        throw Object.assign(new Error('尚未生成 docker-compose.yml，请先在「部署配置」中生成'), { status: 400 });
-      }
-      taskId = await docker.composeTask('compose-up', ['up', '-d']);
-    }
-    res.json({ ok: true, data: { taskId, mode: config.runMode } });
+    const result = await containerActionOrComposeTask('up');
+    res.json({ ok: true, data: { ...result, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
 router.post('/down', async (req, res, next) => {
   try {
-    const taskId = config.runMode === 'container'
-      ? docker.runTask('container-stop', 'docker', ['stop', config.tsContainerName])
-      : await docker.composeTask('compose-down', ['down']);
-    res.json({ ok: true, data: { taskId, mode: config.runMode } });
+    const result = await containerActionOrComposeTask('down');
+    res.json({ ok: true, data: { ...result, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
 router.post('/restart', async (req, res, next) => {
   try {
-    const taskId = config.runMode === 'container'
-      ? docker.runTask('container-restart', 'docker', ['restart', config.tsContainerName])
-      : await docker.composeTask('compose-restart', ['restart']);
-    res.json({ ok: true, data: { taskId, mode: config.runMode } });
+    const result = await containerActionOrComposeTask('restart');
+    res.json({ ok: true, data: { ...result, mode: config.runMode } });
   } catch (err) { next(err); }
 });
 
@@ -148,7 +158,9 @@ router.get('/task/:id', (req, res) => {
 router.get('/logs', async (req, res, next) => {
   try {
     const name = req.query.name || config.tsContainerName;
-    const log = await docker.containerLogs(name, num(req.query.tail, 300));
+    const log = isContainerMode()
+      ? await dockerApi.containerLogs(name, num(req.query.tail, 300))
+      : await docker.containerLogs(name, num(req.query.tail, 300));
     res.json({ ok: true, data: { name, log } });
   } catch (err) { next(err); }
 });
@@ -157,7 +169,9 @@ router.get('/logs', async (req, res, next) => {
 router.get('/credentials', async (req, res, next) => {
   try {
     const name = req.query.name || config.tsContainerName;
-    const log = await docker.containerLogs(name, 2000);
+    const log = isContainerMode()
+      ? await dockerApi.containerLogs(name, 2000)
+      : await docker.containerLogs(name, 2000);
     const lines = docker.extractCredentials(log);
     res.json({ ok: true, data: { found: lines.length > 0, lines, note: lines.length ? null : '日志中未发现凭证关键字，可查看完整日志确认' } });
   } catch (err) { next(err); }

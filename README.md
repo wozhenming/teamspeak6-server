@@ -34,8 +34,8 @@ teamspeak-server/
 ├── query_ip_allowlist.txt     # Query 接口 IP 白名单（WebQuery/SSH Query）
 ├── deploy/                    # 备用：仅 TS6 的裸机/独立部署方案（install.sh）
 ├── panel/                     # Web 管理面板（Node.js + Express）
-│   ├── Dockerfile             # 面板镜像
-│   ├── src/                   # server/config/auth/webquery/docker + routes
+│   ├── Dockerfile             # 面板镜像（零 apk 依赖，经 docker.sock 直连 Docker API）
+│   ├── src/                   # server/config/auth/webquery/docker-api + routes
 │   ├── public/                # 前端（原生 HTML/JS + Chart.js）
 │   └── test/                  # mock WebQuery + 端到端测试
 └── ts服务端开发文档.md
@@ -57,7 +57,7 @@ teamspeak-server/
 常用命令：
 
 ```bash
-docker compose up -d          # 启动
+docker compose up -d          # 启动（panel 镜像本地构建，不从 registry 拉取）
 docker compose logs -f panel  # 面板日志
 docker compose ps             # 状态
 docker compose restart teamspeak   # 重启 TS6（修改白名单后需要）

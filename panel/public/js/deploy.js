@@ -270,15 +270,22 @@ TSPages.deploy = async function () {
   // ============ ③ 启动服务 ============
   async function runTask(apiCall, label, done) {
     const consoleEl = $('task-console');
-    setTerm(consoleEl, [`[${label}] 任务已提交…`]);
-    let taskId = null;
+    setTerm(consoleEl, [`[${label}] 执行中…`]);
+    let d = null;
     try {
-      const d = await apiCall();
-      taskId = d.taskId;
+      d = await apiCall();
     } catch (e) {
       setTerm(consoleEl, [`[${label}] 提交失败：${e.message}`]);
       return;
     }
+    // 容器化模式：操作即时完成（无 taskId）
+    if (!d || !d.taskId) {
+      setTerm(consoleEl, [`[${label}] 完成 ✓`]);
+      if (done) done({ code: 0 });
+      await loadStatus();
+      return;
+    }
+    const taskId = d.taskId;
     if (taskTimer) clearInterval(taskTimer);
     taskTimer = setInterval(async () => {
       try {

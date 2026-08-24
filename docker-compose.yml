@@ -38,6 +38,7 @@ services:
   panel:
     build: ./panel
     image: ts6-panel:local
+    pull_policy: never              # 只使用本地构建产物，不从 registry 拉取（避免镜像源 403）
     container_name: ts6-panel
     restart: unless-stopped
     ports:
