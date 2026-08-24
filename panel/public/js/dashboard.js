@@ -90,14 +90,17 @@ TSPages.dashboard = async function () {
     });
   }
 
-  // 按当前范围绘制固定时间轴网格（切换范围后轴跨度明显变化，数据点对齐网格）
+  // 按当前范围绘制固定时间轴网格（切换后轴跨度明显变化）
+  // 网格步长动态调整：目标 ≤120 格、最小 1 分钟 —— 采样历史短时
+  // 数据点分布在多个格子（保证连线），历史长时轴跨度完整
   function renderCharts() {
     ensureCharts();
     if (!clientsChart) return;
     const now = Date.now();
-    const start = now - range * 60000;
-    const STEP = 5 * 60000; // 轴网格步长 5 分钟
-    const count = Math.max(1, Math.ceil((range * 60000) / STEP));
+    const win = range * 60000;
+    const STEP = Math.max(60000, Math.ceil(win / 120));
+    const start = Math.floor((now - win) / STEP) * STEP;
+    const count = Math.max(1, Math.ceil((now - start) / STEP));
     const labels = [];
     const clientsData = new Array(count).fill(null);
     const upData = new Array(count).fill(null);
@@ -117,10 +120,15 @@ TSPages.dashboard = async function () {
 
     clientsChart.data.labels = labels;
     clientsChart.data.datasets[0].data = clientsData;
+    // 非空格 >= 2 时纯线；单点时显示圆点（避免空白）
+    const lineOk = clientsData.filter((v) => v !== null).length >= 2;
+    clientsChart.data.datasets[0].pointRadius = lineOk ? 0 : 2;
     clientsChart.update('none');
     bandwidthChart.data.labels = labels;
     bandwidthChart.data.datasets[0].data = upData;
     bandwidthChart.data.datasets[1].data = downData;
+    bandwidthChart.data.datasets[0].pointRadius = lineOk ? 0 : 1.5;
+    bandwidthChart.data.datasets[1].pointRadius = lineOk ? 0 : 1.5;
     bandwidthChart.update('none');
   }
 
