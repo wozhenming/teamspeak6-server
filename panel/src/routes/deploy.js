@@ -166,12 +166,14 @@ router.get('/logs', async (req, res, next) => {
 });
 
 // ---------- 初始管理员凭证 ----------
+// 注意：凭证仅在容器首次启动时打印；若容器曾被重建（docker compose up 应用
+// 新配置），历史日志会被清空，此时应使用 TSSERVER_QUERY_ADMIN_PASSWORD 重置。
 router.get('/credentials', async (req, res, next) => {
   try {
     const name = req.query.name || config.tsContainerName;
     const log = isContainerMode()
-      ? await dockerApi.containerLogs(name, 2000)
-      : await docker.containerLogs(name, 2000);
+      ? await dockerApi.containerLogs(name, 10000)
+      : await docker.containerLogs(name, 10000);
     const lines = docker.extractCredentials(log);
     res.json({ ok: true, data: { found: lines.length > 0, lines, note: lines.length ? null : '日志中未发现凭证关键字，可查看完整日志确认' } });
   } catch (err) { next(err); }

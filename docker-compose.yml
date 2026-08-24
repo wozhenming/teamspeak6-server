@@ -27,8 +27,8 @@ services:
       - TSSERVER_QUERY_SSH_ENABLED=true    # 启用 SSH Query（API Key 生成必需，默认禁用）
       - TSSERVER_QUERY_ALLOW_LIST=/etc/tsserver/query_ip_allowlist.txt  # Query 接口 IP 白名单
       # ⚠️ 远程连接 SSH Query 时，记得把来源 IP 加入 query_ip_allowlist.txt 并重启 teamspeak 容器
-      # 覆盖默认 Query 管理员密码（可选）：
-      # - TSSERVER_QUERY_ADMIN_PASSWORD=your_password
+      # 覆盖默认 Query 管理员密码（忘记密码时设置此项即可重置，见 .env 的 TS_QUERY_ADMIN_PASSWORD）：
+      - TSSERVER_QUERY_ADMIN_PASSWORD=${TS_QUERY_ADMIN_PASSWORD:-}
     volumes:
       - teamspeak-data:/var/tsserver/
       - ./query_ip_allowlist.txt:/etc/tsserver/query_ip_allowlist.txt:ro
