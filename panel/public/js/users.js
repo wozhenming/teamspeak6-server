@@ -17,9 +17,9 @@ TSPages.users = async function () {
         <table>
           <thead><tr>
             <th>昵称</th><th>UID</th><th>频道</th><th>国家</th>
-            <th class="num">Ping</th><th>连接时长</th><th>空闲</th><th class="actions">操作</th>
+            <th>连接时长</th><th>空闲<span class="muted" title="距用户上次活动（说话/操作）的时间，活动后重新计时"> ⓘ</span></th><th class="actions">操作</th>
           </tr></thead>
-          <tbody id="user-tbody"><tr><td colspan="8"><div class="empty">加载中…</div></td></tr></tbody>
+          <tbody id="user-tbody"><tr><td colspan="7"><div class="empty">加载中…</div></td></tr></tbody>
         </table>
       </div>
     </div>`;
@@ -29,7 +29,7 @@ TSPages.users = async function () {
     const tbody = document.getElementById('user-tbody');
     document.getElementById('user-count').textContent = `（${data.clients.length} 人）`;
     if (!data.clients.length) {
-      tbody.innerHTML = '<tr><td colspan="8"><div class="empty">暂无在线用户</div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">暂无在线用户</div></td></tr>';
       return;
     }
     tbody.innerHTML = data.clients.map(c => `<tr>
@@ -37,9 +37,8 @@ TSPages.users = async function () {
       <td class="mono muted" title="${TSUtils.escapeHtml(c.uid || '')}">${TSUtils.escapeHtml((c.uid || '-').slice(0, 12))}…</td>
       <td>${TSUtils.escapeHtml(c.channel_name || '')}</td>
       <td>${TSUtils.escapeHtml(c.country || '-')}</td>
-      <td class="num">${c.ping == null ? '-' : c.ping + ' ms'}</td>
       <td>${TSUtils.fmtDuration(c.connected_seconds)}</td>
-      <td>${TSUtils.fmtDuration(c.idle_seconds)}</td>
+      <td title="距上次活动的时间，用户说话/操作后会重新计时">${TSUtils.fmtDuration(c.idle_seconds)}</td>
       <td class="actions">
         <button class="btn btn-sm" data-act="poke" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">Poke</button>
         <button class="btn btn-sm" data-act="msg" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">私聊</button>

@@ -34,8 +34,9 @@ const clients = [
     client_type: '0', client_country: 'CN', connection_ping: 21, client_connected_time: 3600, client_idle_time: 120 },
   { clid: 2, cid: 3, client_nickname: 'Bob', client_unique_identifier: 'uid-bob-002',
     client_type: '0', client_country: 'DE', connection_ping: 88, client_connected_time: 180, client_idle_time: 5 },
+  // 对齐真实 TS6：ServerQuery 客户端 -times 不返回 client_connected_time
   { clid: 3, cid: 1, client_nickname: 'serveradmin', client_unique_identifier: 'serveradmin',
-    client_type: '1', client_country: '', connection_ping: 0, client_connected_time: 7200, client_idle_time: 0 },
+    client_type: '1', client_country: '', connection_ping: 0, client_idle_time: 0 },
 ];
 
 let channelSeq = 100;
@@ -103,9 +104,12 @@ const server = http.createServer((req, res) => {
       }
       break;
     }
-    case 'clientinfo':
-      body = ok([{ ...clients[0], connection_client_ip: '203.0.113.7' }]);
+    case 'clientinfo': {
+      // 按 clid 匹配（与真实 TS6 一致），返回 connection_* 扩展字段
+      const c = clients.find((x) => Number(x.clid) === Number(params.clid)) || clients[0];
+      body = ok([{ ...c, connection_client_ip: '203.0.113.7', connection_connected_time: c.client_connected_time }]);
       break;
+    }
     case 'channellist': {
       // 模拟真实 TS6：带 flag 参数才返回密码/主题等扩展字段
       const hasFlags = Object.keys(params).some((k) => k.startsWith('-'));

@@ -87,10 +87,12 @@ async function login() {
   const alice = j.data && j.data.clients.find((c) => c.nickname === 'Alice');
   await check('UID 字段', alice && alice.uid === 'uid-alice-001', alice);
   await check('国家字段', alice && alice.country === 'CN', alice);
-  await check('Ping 字段', alice && alice.ping === 21, alice);
-  await check('连接时长字段', alice && alice.connected_seconds === 3600, alice);
+  await check('连接时长字段(clientinfo)', alice && alice.connected_seconds === 3600, alice);
   await check('空闲字段', alice && alice.idle_seconds === 120, alice);
   await check('频道名字段', alice && alice.channel_name === 'Lobby', alice);
+  const bob = j.data && j.data.clients.find((c) => c.nickname === 'Bob');
+  await check('Bob 连接时长独立(clientinfo)', bob && bob.connected_seconds === 180, bob);
+  await check('Query 客户端无连接时长', j.data.clients.find((c) => c.nickname === 'serveradmin').connected_seconds == null);
 
   r = await fetch(`${BASE}/api/servers/1/clients/1/kick`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'test', from: 'server' }) });
   j = await r.json();

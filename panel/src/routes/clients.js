@@ -19,16 +19,20 @@ function sidOf(req) {
   return parseInt(req.params.sid, 10) || 1;
 }
 
-function mapClient(c) {
+function mapClient(c, info) {
   return {
     clid: Number(c.clid),
     cid: Number(c.cid),
     nickname: c.client_nickname || '?',
     uid: c.client_unique_identifier || '',
     country: c.client_country || '',
-    ping: c.connection_ping != null ? c.connection_ping : c.client_ping,
-    connected_seconds: c.client_connected_time != null ? c.client_connected_time : c.connection_connected_time,
-    idle_seconds: c.client_idle_time != null ? c.client_idle_time : c.connection_idle_time,
+    // TS6 查询接口不提供单用户 Ping（官方文档无此字段），故不返回
+    connected_seconds: (info && info.connection_connected_time != null)
+      ? info.connection_connected_time
+      : (c.client_connected_time != null ? c.client_connected_time : (c.connection_connected_time != null ? c.connection_connected_time : null)),
+    idle_seconds: (info && info.client_idle_time != null)
+      ? info.client_idle_time
+      : (c.client_idle_time != null ? c.client_idle_time : null),
     away: c.client_away === 1 || c.client_away === '1',
     is_query: String(c.client_type) === '1',
   };
@@ -40,8 +44,20 @@ router.get('/', async (req, res, next) => {
     const sid = sidOf(req);
     const [clients, channels] = await Promise.all([ts.clientlist(sid), ts.channellist(sid)]);
     const channelById = new Map(channels.map(c => [Number(c.cid), c]));
+
+    // 连接时长等扩展字段来自 clientinfo（clientlist -times 只提供 idle/created/lastconnected）
+    // 仅对真实语音客户端查询（ServerQuery 客户端无这些数据）
+    const voiceClients = clients.filter(c => String(c.client_type) !== '1');
+    const infos = await Promise.all(voiceClients.map(c =>
+      ts.clientinfo(sid, Number(c.clid)).catch(() => null)
+    ));
+    const infoByClid = new Map();
+    voiceClients.forEach((c, i) => {
+      if (infos[i]) infoByClid.set(Number(c.clid), infos[i]);
+    });
+
     const list = clients.map(c => {
-      const m = mapClient(c);
+      const m = mapClient(c, infoByClid.get(Number(c.clid)));
       m.channel_name = (channelById.get(m.cid) || {}).channel_name || '';
       return m;
     });
