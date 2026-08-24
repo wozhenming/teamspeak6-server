@@ -16,7 +16,22 @@
   let currentSid = null;
 
   // ---------- 全局工具 ----------
+  // SVG 图标集（Feather 风格，统一替代 emoji）
+  const ICON = (paths, extra) =>
+    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra || ''}>${paths}</svg>`;
+
   window.TSUtils = {
+    icons: {
+      edit: ICON('<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>'),
+      rocket: ICON('<path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8-.8-.7-2.2-.7-3 .8z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/>'),
+      play: ICON('<path d="M5 3l14 9-14 9V3z"/>', 'fill="currentColor" stroke="none"'),
+      zap: ICON('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>'),
+      help: ICON('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'),
+      lock: ICON('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+      box: ICON('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>'),
+      sun: ICON('<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>'),
+      moon: ICON('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+    },
     sid() {
       return currentSid;
     },
@@ -196,6 +211,29 @@
     }
   }
 
+  // ---------- 主题切换（暗色/亮色，localStorage 记忆） ----------
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('ts6-theme', theme);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) {
+      btn.innerHTML = theme === 'dark' ? TSUtils.icons.sun : TSUtils.icons.moon;
+      btn.title = theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题';
+    }
+  }
+
+  function initTheme() {
+    const saved = localStorage.getItem('ts6-theme') || 'dark';
+    applyTheme(saved);
+    const btn = document.getElementById('theme-toggle');
+    if (btn) {
+      btn.onclick = () => {
+        const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+      };
+    }
+  }
+
   // ---------- 启动 ----------
   window.addEventListener('hashchange', navigate);
   document.getElementById('logout-btn').onclick = async () => {
@@ -209,6 +247,7 @@
   };
 
   (async function boot() {
+    initTheme();
     try {
       const me = await API.me();
       document.getElementById('current-user').textContent = me.username;

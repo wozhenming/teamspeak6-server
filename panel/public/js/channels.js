@@ -45,7 +45,7 @@ TSPages.channels = async function () {
         const kids = byParent.has(ch.cid) ? render(ch.cid) : '';
         const count = ch.clients || 0;
         return `<div class="channel-node" data-cid="${ch.cid}">
-          <span class="ch-name" title="${TSUtils.escapeHtml(ch.name)}">${TSUtils.escapeHtml(ch.name)}${ch.has_password ? ' 🔒' : ''}</span>
+          <span class="ch-name" title="${TSUtils.escapeHtml(ch.name)}">${TSUtils.escapeHtml(ch.name)}${ch.has_password ? ' ' + TSUtils.icons.lock : ''}</span>
           <span class="ch-count">${count} 人</span>
         </div>${kids}`;
       }).join('') + `</div>`;
@@ -57,7 +57,7 @@ TSPages.channels = async function () {
     return top.map(ch => {
       const kids = render(ch.cid);
       return `<div class="channel-node" data-cid="${ch.cid}">
-        <span class="ch-name" title="${TSUtils.escapeHtml(ch.name)}">${TSUtils.escapeHtml(ch.name)}${ch.has_password ? ' 🔒' : ''}</span>
+        <span class="ch-name" title="${TSUtils.escapeHtml(ch.name)}">${TSUtils.escapeHtml(ch.name)}${ch.has_password ? ' ' + TSUtils.icons.lock : ''}</span>
         <span class="ch-count">${ch.clients || 0} 人</span>
       </div>${kids}`;
     }).join('');

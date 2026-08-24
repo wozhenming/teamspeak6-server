@@ -61,7 +61,7 @@ TSPages.deploy = async function () {
         <span id="container-state" class="badge">未知</span>
       </h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <button class="btn btn-primary" id="btn-up">🚀 启动服务</button>
+        <button class="btn btn-primary" id="btn-up">${TSUtils.icons.rocket} 启动服务</button>
         <button class="btn" id="btn-restart">重启</button>
         <button class="btn btn-danger" id="btn-down">停止</button>
         <button class="btn" id="btn-refresh-status">刷新状态</button>
@@ -84,7 +84,7 @@ TSPages.deploy = async function () {
         面板可 <b>一键生成</b>（自动经 SSH Query 执行 apikeyadd 并保存），也可手动生成后粘贴：
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-        <button class="btn btn-primary" id="btn-gen-key">⚡ 一键生成 API Key</button>
+        <button class="btn btn-primary" id="btn-gen-key">${TSUtils.icons.zap} 一键生成 API Key</button>
         <span class="muted" style="font-size:12.5px">需要 serveradmin 密码（自动从容器配置/日志获取，失败时提示输入）</span>
       </div>
       <div class="cmd-box">
@@ -96,7 +96,7 @@ TSPages.deploy = async function () {
         <button class="btn btn-sm" data-copy="apikeyadd scope=manage lifetime=0">复制</button>
       </div>
       <details class="hint-box">
-        <summary>❓ 连接问题排查（点击展开）</summary>
+        <summary>${TSUtils.icons.help} 连接问题排查（点击展开）</summary>
         <div class="hint-body">
           <b>连接被拒绝（Connection refused）？</b>说明 SSH Query 端口只绑定了服务器本机。两种处理：
           <br>① 在<b>服务器上</b>执行（推荐）：<code class="mono">ssh -p 10022 serveradmin@127.0.0.1</code>
@@ -172,7 +172,7 @@ TSPages.deploy = async function () {
     const configNote = $('config-note');
 
     if (isContainer) {
-      banner.innerHTML = `<div class="alert">🧊 容器化模式：TS6 服务器与本面板由项目根目录 <b>docker-compose.yml</b> 统一管理
+      banner.innerHTML = `<div class="alert">${TSUtils.icons.box} 容器化模式：TS6 服务器与本面板由项目根目录 <b>docker-compose.yml</b> 统一管理
         （docker compose up -d 启动）。本页提供初始凭证提取、API Key 配置、日志查看与 TS6 容器快捷启停。</div>`;
       // ② 不消失：显示为说明卡片（端口/密码等由根目录 compose 管理）
       if (configForm) configForm.hidden = true;
@@ -186,7 +186,7 @@ TSPages.deploy = async function () {
           <div class="cmd-box"><code>docker compose up -d          # 应用修改</code></div>
           <div class="muted" style="font-size:12px;margin-top:6px">修改后到 ① 环境检测 点「刷新状态」即可看到新配置生效。</div>`;
       }
-      $('btn-up').innerHTML = '▶ 启动 TS6 容器';
+      $('btn-up').innerHTML = `${TSUtils.icons.play} 启动 TS6 容器`;
       $('btn-up').title = 'docker start teamspeak-server';
       $('btn-restart').innerHTML = '重启容器';
       $('btn-down').innerHTML = '停止容器';
@@ -194,7 +194,7 @@ TSPages.deploy = async function () {
       banner.innerHTML = '';
       if (configForm) configForm.hidden = false;
       if (configNote) configNote.hidden = true;
-      $('btn-up').innerHTML = '🚀 启动服务（docker compose up -d）';
+      $('btn-up').innerHTML = `${TSUtils.icons.rocket} 启动服务（docker compose up -d）`;
       $('btn-up').title = '';
       $('btn-restart').innerHTML = '重启';
       $('btn-down').innerHTML = '停止';

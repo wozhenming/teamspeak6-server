@@ -43,6 +43,8 @@ const API = (function () {
     me: () => request('GET', '/api/me'),
 
     overview: (sid) => request('GET', `/api/overview?sid=${encodeURIComponent(sid)}`),
+    overviewHistory: (minutes) => request('GET', `/api/overview/history?minutes=${minutes || 60}`),
+    recentClients: () => request('GET', '/api/overview/recent-clients'),
     servers: () => request('GET', '/api/servers'),
     editServer: (sid, name) => request('PUT', `/api/servers/${sid}`, { virtualserver_name: name }),
 

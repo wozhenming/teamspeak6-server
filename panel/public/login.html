@@ -34,6 +34,8 @@
   <script src="/js/api.js"></script>
   <script>
     (function () {
+      // 应用已保存的主题
+      document.documentElement.dataset.theme = localStorage.getItem('ts6-theme') || 'dark';
       // 已登录则直接进入面板
       API.me().then(function () { location.href = '/'; }).catch(function () {});
       document.getElementById('login-form').addEventListener('submit', async function (e) {

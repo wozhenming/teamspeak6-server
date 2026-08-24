@@ -66,6 +66,23 @@ function mapChannel(ch) {
   };
 }
 
+// ---------- 历史指标（采样器数据） ----------
+router.get('/history', async (req, res, next) => {
+  try {
+    const minutes = Math.min(Math.max(parseInt(req.query.minutes, 10) || 60, 5), 1440);
+    const metrics = require('../metrics');
+    res.json({ ok: true, data: { points: metrics.history(minutes), minutes } });
+  } catch (err) { next(err); }
+});
+
+// ---------- 最近加入用户（退出后仍保留） ----------
+router.get('/recent-clients', async (req, res, next) => {
+  try {
+    const metrics = require('../metrics');
+    res.json({ ok: true, data: { clients: metrics.recent() } });
+  } catch (err) { next(err); }
+});
+
 router.get('/', async (req, res, next) => {
   try {
     const sid = parseInt(req.query.sid, 10) || 1;

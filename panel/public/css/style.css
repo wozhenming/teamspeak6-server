@@ -14,7 +14,35 @@
   --radius: 10px;
   --shadow: 0 6px 20px rgba(0, 0, 0, .35);
   --font: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  /* 专用组件色（终端/凭证框等） */
+  --term-bg: #0b0e14;
+  --term-text: #9fe8a8;
+  --cred-bg: #0f2418;
+  --input-bg: var(--bg);
 }
+
+/* 亮色主题 */
+html[data-theme="light"] {
+  --bg: #f2f5fa;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #eef2f8;
+  --border: #d9e0ec;
+  --text: #1c2433;
+  --text-muted: #64708a;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --green: #16a34a;
+  --yellow: #d97706;
+  --red: #dc2626;
+  --shadow: 0 6px 20px rgba(30, 60, 120, .10);
+  --term-bg: #f6f8fc;
+  --term-text: #0f5132;
+  --cred-bg: #eafaf1;
+  --input-bg: #ffffff;
+}
+html[data-theme="light"] select.select option { background: #ffffff; }
+html[data-theme="light"] tr:hover td { background: rgba(30, 60, 120, .04); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -143,7 +171,7 @@ a { color: var(--accent); text-decoration: none; }
 .btn-ghost { background: transparent; }
 
 .select, .input, input[type="text"], input[type="password"], input[type="number"], input[type="datetime-local"] {
-  background: var(--bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 8px;
@@ -306,26 +334,26 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 
 .term {
-  background: #0b0e14;
+  background: var(--term-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px;
   font-family: Consolas, "Courier New", monospace;
   font-size: 12.5px;
   line-height: 1.55;
-  color: #9fe8a8;
+  color: var(--term-text);
   max-height: 260px;
   overflow-y: auto;
 }
 .term-tall { max-height: 320px; }
-.term .term-empty { color: #55607a; }
+.term .term-empty { color: var(--text-muted); }
 .term div { white-space: pre-wrap; word-break: break-all; }
 
 .cmd-box {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 12px;
@@ -334,7 +362,7 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .cmd-box code { flex: 1; font-family: Consolas, "Courier New", monospace; font-size: 13px; color: var(--text); word-break: break-all; }
 
 .cred-box {
-  background: #0f2418;
+  background: var(--cred-bg);
   border: 1px solid var(--green);
   border-radius: 8px;
   padding: 12px 14px;
@@ -363,3 +391,13 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .hint-box[open] summary { margin-bottom: 8px; }
 .hint-body { line-height: 1.9; }
 .hint-body .mono { color: var(--text); }
+
+/* ---------- 时间范围按钮 ---------- */
+.range-btns { display: inline-flex; gap: 4px; }
+.range-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.chart-box .range-btns { position: absolute; top: 10px; right: 10px; }
+.btn svg { flex: none; }

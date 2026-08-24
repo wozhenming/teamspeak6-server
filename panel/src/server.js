@@ -63,6 +63,9 @@ app.use((err, req, res, next) => {
 });
 
 // ---------- 启动 ----------
+// 指标采样器（仪表盘历史图表 / 最近加入用户）
+require('./metrics').start();
+
 app.listen(config.port, config.host, () => {
   console.log('==============================================');
   console.log(` TeamSpeak 6 管理面板已启动`);
