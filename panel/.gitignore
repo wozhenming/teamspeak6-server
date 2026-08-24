@@ -1,0 +1,4 @@
+node_modules/
+.env
+*.log
+ts6-boot.log

@@ -1,0 +1,31 @@
+# ============================================================================
+# TeamSpeak 6 Server 配置文件模板（可选）
+#
+# 使用方式：将本文件放到与 docker-compose.yml 相同的目录，然后运行 install.sh，
+#           脚本会自动把它挂载到容器 /etc/tsserver/tsserver.yaml。
+#
+# ⚠️ 注意：TS6 仍处于 Beta，配置项的完整键名请以官方文档为准：
+#   https://support.teamspeak.com/hc/en-us/articles/28866578414877
+#   配置错误的键名可能导致服务器启动失败，建议先验证再挂载。
+#
+# 常用配置也可以通过环境变量完成（见 docker-compose.yml）：
+#   TSSERVER_LICENSE_ACCEPTED       接受许可证（accept）
+#   TSSERVER_QUERY_ADMIN_PASSWORD   覆盖默认 Query 管理员密码
+# ============================================================================
+
+# 日志配置（示例，键名仅供参考）
+# logging:
+#   level: info
+
+# 许可证
+# license:
+#   accepted: true
+
+# Query 接口
+# query:
+#   http:
+#     enabled: true
+#     port: 10080
+#   ssh:
+#     enabled: true
+#     port: 10022
