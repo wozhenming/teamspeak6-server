@@ -159,10 +159,8 @@ a { color: var(--accent); text-decoration: none; }
 .menu-toggle:hover { background: var(--bg-hover); }
 .menu-toggle:active { background: var(--bg-hover); opacity: 0.8; }
 
-/* 汉堡按钮始终显示（侧边栏可在任意尺寸折叠） */
-.menu-toggle { display: flex; }
-
 @media (max-width: 1024px) {
+  .menu-toggle { display: flex; }
   .sidebar {
     transform: translateX(-100%);
   }

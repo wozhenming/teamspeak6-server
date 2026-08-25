@@ -246,7 +246,6 @@
           if (window.innerWidth <= 1024) {
             sidebar.classList.remove('open');
             sidebar.style.transform = '';
-            if (main) main.style.marginLeft = '';
             if (overlay) overlay.classList.remove('active');
           }
         });

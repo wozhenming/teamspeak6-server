@@ -51,13 +51,13 @@
   </aside>
 
   <!-- 移动端侧边栏遮罩 -->
-  <div class="sidebar-overlay" id="sidebar-overlay" onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main');s.classList.remove('open');s.style.transform='';m.style.marginLeft='';this.classList.remove('active')"></div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main');s.classList.remove('open');s.style.transform='';if(window.innerWidth>1024)m.style.marginLeft='';this.classList.remove('active')"></div>
 
   <main class="main" id="main">
     <header class="topbar">
       <div class="topbar-left">
         <button class="btn btn-sm menu-toggle" id="menu-toggle" title="菜单"
-          onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main'),o=document.getElementById('sidebar-overlay');s.classList.toggle('open');o.classList.toggle('active');if(s.classList.contains('open')){s.style.transform='translateX(0)';m.style.marginLeft='220px'}else{s.style.transform='translateX(-100%)';m.style.marginLeft='0'}">
+          onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main'),o=document.getElementById('sidebar-overlay'),w=window.innerWidth>1024;s.classList.toggle('open');o.classList.toggle('active');if(s.classList.contains('open')){s.style.transform='translateX(0)';if(w)m.style.marginLeft='220px'}else{s.style.transform=w?'translateX(-220px)':'translateX(-100%)';if(w)m.style.marginLeft='0'}">>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <h2 id="page-title">仪表盘</h2>
