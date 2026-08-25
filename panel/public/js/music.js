@@ -69,7 +69,7 @@ TSPages.music = async function () {
       <details class="ts-cfg">
         <summary style="cursor:pointer;font-size:12.5px;margin-top:8px">配置 ts6-manager 与 TeamSpeak 连接</summary>
         <div style="margin-top:10px;display:grid;gap:8px">
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">ts6-manager 地址</span><input class="input" id="ts-url" placeholder="http://ts6mgr-backend:3001"></div>
+          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">ts6-manager 地址</span><input class="input" id="ts-url" placeholder="http://backend:3001"></div>
           <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">管理员账号</span><input class="input" id="ts-user"></div>
           <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">管理员密码</span><input class="input" id="ts-pass" type="password"></div>
           <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">加入频道名</span><input class="input" id="ts-channel" placeholder="如：音乐厅"></div>

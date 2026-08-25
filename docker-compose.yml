@@ -121,7 +121,8 @@ services:
   # 它作为真实语音客户端加入 TS 频道，把音频推流进频道。连接信息在 ts6-manager
   # 管理界面（默认 http://<主机>:3002）的 Settings → Connections 中填写：
   #   Host = teamspeak，WebQuery 端口 = 10080，API Key = 与面板相同的 WebQuery Key。
-  ts6mgr-backend:
+  # 注意：后端服务名必须是 backend（前端镜像的 nginx 反代上游写死为 backend）。
+  backend:
     image: clusterzx/ts6-manager:backend
     container_name: ts6mgr-backend
     restart: unless-stopped
@@ -162,7 +163,7 @@ services:
     ports:
       - "${TS6MGR_PORT:-3002}:80"
     depends_on:
-      - ts6mgr-backend
+      - backend
     networks:
       - ts6
 
