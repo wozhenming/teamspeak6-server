@@ -68,9 +68,14 @@ TSPages.music = async function () {
       <div id="ts-status" class="muted" style="font-size:12.5px">未连接</div>
       <div style="display:flex;flex-direction:column;gap:3px;margin-top:10px">
         <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
-        <input class="input" id="ts-channel" placeholder="如：音乐厅 / 大厅" style="flex:1">
+        <div style="display:flex;gap:8px">
+          <select id="ts-channel" class="select" style="flex:1">
+            <option value="">（加载频道中…）</option>
+          </select>
+          <button class="btn btn-sm" id="btn-ts-refresh" title="刷新频道列表">↻</button>
+        </div>
       </div>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">ts6-manager 与 TeamSpeak 连接已自动配置，无需填写；只需点“连接到频道”。</div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px">ts6-manager 与 TeamSpeak 连接已自动配置；选好频道后点“连接到频道”。</div>
     </div>
 
     <div class="card">
@@ -397,9 +402,11 @@ TSPages.music = async function () {
   }
   $('btn-ts-link').onclick = async () => {
     try {
+      const ch = $('ts-channel').value.trim();
+      if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
       TSUtils.toast('正在连接 TeamSpeak…', 'success');
       // 先保存频道，再连接（其余配置由后端自动套用默认值）
-      await API.musicTsSaveConfig({ ts6mgrChannel: $('ts-channel').value.trim() });
+      await API.musicTsSaveConfig({ ts6mgrChannel: ch });
       const r = await API.musicTsLink();
       TSUtils.toast('已连接：bot #' + r.botId, 'success');
       refreshTsStatus();
@@ -409,13 +416,34 @@ TSPages.music = async function () {
     try { await API.musicTsUnlink(); TSUtils.toast('已断开推流', 'success'); refreshTsStatus(); }
     catch (e) { TSUtils.toast('断开失败：' + e.message, 'error'); }
   };
-  async function loadTsConfig() {
+  async function loadTsChannels() {
+    const sel = $('ts-channel');
     try {
-      const c = await API.musicTsConfig();
-      $('ts-channel').value = c.ts6mgrChannel || '';
-    } catch (e) { /* 忽略 */ }
+      const channels = await API.musicTsChannels();
+      const saved = (await API.musicTsConfig()).ts6mgrChannel || '';
+      sel.innerHTML = '';
+      if (!channels.length) {
+        sel.innerHTML = '<option value="">（无频道，请先在 TS 创建）</option>';
+        return;
+      }
+      channels.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = c.path || c.name;
+        o.textContent = c.path || c.name;
+        if ((c.path || c.name) === saved) o.selected = true;
+        sel.appendChild(o);
+      });
+      if (saved && !channels.some((c) => (c.path || c.name) === saved)) {
+        const o = document.createElement('option');
+        o.value = saved; o.textContent = saved + '（当前）'; o.selected = true;
+        sel.appendChild(o);
+      }
+    } catch (e) {
+      sel.innerHTML = '<option value="">（加载失败：' + e.message + '）</option>';
+    }
   }
-  loadTsConfig();
+  $('btn-ts-refresh').onclick = loadTsChannels;
+  loadTsChannels();
   refreshTsStatus();
 
 

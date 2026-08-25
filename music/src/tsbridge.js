@@ -10,7 +10,7 @@
  * 仅在配置了 TS6MGR_URL / TS6MGR_USER / TS6MGR_PASS 时启用。
  */
 
-const config = require('./config');
+const { config } = require('./config');
 
 function cfg() {
   return {
@@ -98,6 +98,41 @@ async function getBots(token) {
   const { status, json } = await authFetch('GET', '/api/music-bots', token);
   if (status !== 200) throw new Error('获取音乐机器人列表失败 (HTTP ' + status + ')');
   return (json.data && json.data.bots) || json.data || json || [];
+}
+
+// 列出 TS 服务器现有频道（供面板下拉选择）。自动确保 TS 连接已建立。
+async function getChannels(token, serverConfigId) {
+  const { status, json } = await authFetch('GET', '/api/servers/' + serverConfigId + '/channels', token);
+  if (status !== 200) throw new Error('获取频道列表失败 (HTTP ' + status + ')');
+  const raw = (json.data && (json.data.channels || json.data)) || json.channels || json.data || [];
+  const list = Array.isArray(raw) ? raw : [];
+  const norm = list.map((ch) => {
+    const id = ch.id != null ? ch.id : (ch.cid != null ? ch.cid : ch.channelId);
+    const name = ch.name || ch.channelName || ch.channel_name || ('频道' + id);
+    const pid = ch.pid != null ? ch.pid : (ch.parent != null ? ch.parent : null);
+    return { id, name, pid };
+  });
+  const byId = {};
+  norm.forEach((c) => { byId[c.id] = c; });
+  return norm.map((c) => {
+    let path = c.name;
+    let cur = c;
+    let depth = 0;
+    while (cur.pid != null && byId[cur.pid] && depth < 10) {
+      cur = byId[cur.pid];
+      path = cur.name + '/' + path;
+      depth++;
+    }
+    return { id: c.id, name: c.name, path };
+  });
+}
+
+async function listChannels() {
+  const token = await ensureAdmin();
+  const c = cfg();
+  const serverConfigId = await ensureServer(token, c);
+  const channels = await getChannels(token, serverConfigId);
+  return channels;
 }
 
 async function ensureStation(token, serverConfigId) {
@@ -191,4 +226,4 @@ async function status() {
   }
 }
 
-module.exports = { link, unlink, status, cfg };
+module.exports = { link, unlink, status, cfg, listChannels };

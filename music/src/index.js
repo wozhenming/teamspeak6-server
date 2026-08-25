@@ -150,6 +150,9 @@ app.post('/api/ts-bot/link', async (req, res) => {
 app.post('/api/ts-bot/unlink', async (req, res) => {
   try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
+app.get('/api/ts-bot/channels', async (req, res) => {
+  try { ok(res, await tsbridge.listChannels()); } catch (e) { fail(res, 400, 'TS_CHANNELS_FAIL', e.message); }
+});
 
 // ---------- 登录状态 ----------
 app.get('/api/status', async (req, res) => {

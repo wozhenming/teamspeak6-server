@@ -110,6 +110,7 @@ const API = (function () {
     musicTsSaveConfig: (cfg) => request('PUT', '/api/music/ts-bot/config', cfg),
     musicTsLink: () => request('POST', '/api/music/ts-bot/link'),
     musicTsUnlink: () => request('POST', '/api/music/ts-bot/unlink'),
+    musicTsChannels: () => request('GET', '/api/music/ts-bot/channels'),
 
     // 图片代理：返回同源 URL，绕过网易云外链防盗链 / 混合内容限制
     // size 形如 '80y80'，会拼到网易云封面 URL 的 ?param= 上以控制分辨率
