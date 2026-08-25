@@ -125,10 +125,11 @@ a { color: var(--accent); text-decoration: none; }
   position: sticky;
   top: 0;
   z-index: 25;
+  overflow: hidden;
 }
-.topbar h2 { font-size: 18px; }
-.topbar-left { display: flex; align-items: center; gap: 10px; }
-.topbar-right { display: flex; align-items: center; gap: 14px; }
+.topbar h2 { font-size: 18px; white-space: nowrap; }
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.topbar-right { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
 
 .page-content { padding: 24px 28px; flex: 1; }
 
@@ -184,6 +185,9 @@ a { color: var(--accent); text-decoration: none; }
   .login-card { width: calc(100vw - 32px); padding: 24px; }
   .topbar-right .muted { display: none; }
   .topbar-right { gap: 8px; }
+  .topbar h2 { overflow: hidden; text-overflow: ellipsis; }
+  .topbar-left { overflow: hidden; }
+  #server-select { max-width: 120px; font-size: 12px; }
   .range-btns { flex-wrap: wrap; }
   .range-btns .btn { min-height: 28px; padding: 4px 8px; font-size: 11px; }
   .term { max-height: 180px; font-size: 11px; }
@@ -208,8 +212,9 @@ a { color: var(--accent); text-decoration: none; }
   .stat-card .stat-value { font-size: 20px; }
   .page-content { padding: 10px; }
   .topbar { padding: 8px 10px; }
-  .topbar h2 { font-size: 15px; }
+  .topbar h2 { font-size: 14px; max-width: calc(100vw - 140px); }
   .topbar-left { gap: 6px; }
+  #server-select { max-width: 90px; font-size: 11px; }
   .cmd-box { flex-direction: column; align-items: stretch; }
   .cmd-box .btn { align-self: flex-start; margin-top: 4px; }
   table { font-size: 12.5px; }
