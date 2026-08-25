@@ -128,6 +128,22 @@ app.get('/api/stream', async (req, res) => {
 app.get('/api/ts-bot/status', async (req, res) => {
   try { ok(res, await tsbridge.status()); } catch (e) { ok(res, { enabled: false, error: e.message }); }
 });
+app.get('/api/ts-bot/config', (req, res) => {
+  ok(res, {
+    ts6mgrUrl: config.ts6mgrUrl,
+    ts6mgrUser: config.ts6mgrUser,
+    ts6mgrPass: config.ts6mgrPass,
+    ts6mgrBotId: config.ts6mgrBotId,
+    ts6mgrChannel: config.ts6mgrChannel,
+    streamPublicUrl: config.streamPublicUrl,
+    tsHost: config.tsHost,
+    tsWebqueryPort: config.tsWebqueryPort,
+    tsApiKey: config.tsApiKey,
+  });
+});
+app.put('/api/ts-bot/config', (req, res) => {
+  try { ok(res, config.saveTsBridge(req.body || {})); } catch (e) { fail(res, 500, 'CFG_FAIL', e.message); }
+});
 app.post('/api/ts-bot/link', async (req, res) => {
   try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
 });

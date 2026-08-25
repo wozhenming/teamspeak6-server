@@ -106,6 +106,8 @@ const API = (function () {
 
     // 点歌机器人接入 TeamSpeak（ts6-manager）
     musicTsStatus: () => request('GET', '/api/music/ts-bot/status'),
+    musicTsConfig: () => request('GET', '/api/music/ts-bot/config'),
+    musicTsSaveConfig: (cfg) => request('PUT', '/api/music/ts-bot/config', cfg),
     musicTsLink: () => request('POST', '/api/music/ts-bot/link'),
     musicTsUnlink: () => request('POST', '/api/music/ts-bot/unlink'),
 

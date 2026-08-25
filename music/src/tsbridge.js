@@ -20,6 +20,9 @@ function cfg() {
     botId: config.ts6mgrBotId ? parseInt(config.ts6mgrBotId, 10) : null,
     channel: config.ts6mgrChannel || '',
     streamUrl: config.streamPublicUrl || 'http://music:3200/api/stream',
+    tsHost: config.tsHost || '',
+    tsWebqueryPort: config.tsWebqueryPort || 10080,
+    tsApiKey: config.tsApiKey || '',
   };
 }
 
@@ -47,8 +50,30 @@ async function getServers(token) {
   const { status, json } = await authFetch('GET', '/api/servers', token);
   if (status !== 200) throw new Error('获取 TS 连接列表失败 (HTTP ' + status + ')');
   const list = (json.data && json.data.servers) || json.servers || json.data || [];
-  if (!Array.isArray(list) || !list.length) throw new Error('ts6-manager 中未配置 TeamSpeak 连接');
+  if (!Array.isArray(list)) throw new Error('ts6-manager 中未配置 TeamSpeak 连接');
   return list;
+}
+
+// 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建
+async function ensureServer(token, c) {
+  const list = await getServers(token);
+  const existing = list.find((s) => s && (s.host === c.tsHost || (c.tsHost && s.host && s.host.includes(c.tsHost))));
+  if (existing) return existing.id;
+  if (!c.tsHost || !c.tsApiKey) {
+    throw new Error('未配置 TeamSpeak 连接（主机/API Key），请在面板填写或在 ts6-manager 的 Settings → Connections 添加');
+  }
+  const created = await authFetch('POST', '/api/servers', token, {
+    name: 'TeamSpeak',
+    host: c.tsHost,
+    webqueryPort: c.tsWebqueryPort,
+    apiKey: c.tsApiKey,
+  });
+  if (created.status !== 201 && created.status !== 200) {
+    const msg = (created.json && (created.json.error && created.json.error.message)) || ('HTTP ' + created.status);
+    throw new Error('自动创建 TS 连接失败（' + msg + '）；请在 ts6-manager 的 Settings → Connections 手动添加');
+  }
+  const s = (created.json && (created.json.data || created.json));
+  return s.id;
 }
 
 async function getBots(token) {
@@ -105,11 +130,10 @@ async function ensureBot(token, serverConfigId) {
 async function link() {
   const c = cfg();
   if (!c.url || !c.user || !c.pass) {
-    throw new Error('未配置 ts6-manager（TS6MGR_URL / TS6MGR_USER / TS6MGR_PASS）');
+    throw new Error('未配置 ts6-manager（地址 / 账号 / 密码）');
   }
   const token = await login();
-  const servers = await getServers(token);
-  const serverConfigId = servers[0].id;
+  const serverConfigId = await ensureServer(token, c);
   const botId = await ensureBot(token, serverConfigId);
   const stationId = await ensureStation(token, serverConfigId);
 
