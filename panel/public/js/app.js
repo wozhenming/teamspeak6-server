@@ -248,13 +248,19 @@
       sidebar.classList.remove('open');
       overlay.classList.remove('active');
     }
-    if (menuBtn) {
-      menuBtn.onclick = () => {
-        sidebar.classList.toggle('open');
-        overlay.classList.toggle('active');
-      };
+    function toggleSidebar(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('active');
     }
-    if (overlay) overlay.onclick = closeSidebar;
+    if (menuBtn) {
+      menuBtn.addEventListener('click', toggleSidebar);
+      menuBtn.addEventListener('touchend', toggleSidebar);
+    }
+    if (overlay) {
+      overlay.addEventListener('click', closeSidebar);
+      overlay.addEventListener('touchend', closeSidebar);
+    }
     // 侧边栏导航点击后自动收起（移动端）
     sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
       a.addEventListener('click', () => { if (window.innerWidth <= 1024) closeSidebar(); });

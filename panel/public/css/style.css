@@ -71,6 +71,7 @@ a { color: var(--accent); text-decoration: none; }
   flex-direction: column;
   z-index: 30;
   transition: transform .2s ease;
+  will-change: transform;
 }
 .sidebar-overlay {
   display: none;
@@ -78,6 +79,9 @@ a { color: var(--accent); text-decoration: none; }
   inset: 0;
   background: rgba(0, 0, 0, .5);
   z-index: 15;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .sidebar-brand {
@@ -140,16 +144,20 @@ a { color: var(--accent); text-decoration: none; }
   border: none;
   color: var(--text);
   cursor: pointer;
-  padding: 6px;
-  margin: -6px;
+  padding: 8px;
+  margin: -8px;
   flex: none;
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 .menu-toggle:hover { background: var(--bg-hover); }
+.menu-toggle:active { background: var(--bg-hover); opacity: 0.8; }
 
 /* ---------- 响应式布局 ---------- */
 @media (max-width: 1024px) {
