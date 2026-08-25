@@ -28,6 +28,8 @@ RUN pnpm config set registry https://registry.npmmirror.com \
     && (pnpm install --frozen-lockfile --prod --ignore-scripts 2>/dev/null \
         || pnpm install --no-frozen-lockfile --prod --ignore-scripts)
 
+COPY music/ncm-start.js /app/ncm-start.js
+
 EXPOSE 3000
 
-CMD ["/sbin/tini", "--", "node", "app.js"]
+CMD ["/sbin/tini", "--", "node", "ncm-start.js"]
