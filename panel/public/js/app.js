@@ -16,25 +16,13 @@
 
   let currentSid = null;
 
-  // 侧边栏切换后调用：遍历页面内所有 canvas，通过 Chart.getChart 找到实例并强制重置尺寸
+  // 侧边栏切换后调用：Chart.js 图表随容器重绘
   window.resizeAllCharts = function resizeAllCharts() {
     if (typeof Chart === 'undefined') return;
-    document.querySelectorAll('.chart-box').forEach(function (box) {
-      var canvas = box.querySelector('canvas');
-      if (!canvas) return;
+    document.querySelectorAll('canvas').forEach(function (c) {
       try {
-        var chart = Chart.getChart(canvas);
-        if (!chart) return;
-        var w = box.clientWidth;
-        var h = box.clientHeight;
-        if (w > 0 && h > 0) {
-          // 强制 canvas 像素尺寸 = 容器实际尺寸（绕过 Chart.js 内部缓存，解决缩小不生效）
-          canvas.style.width = w + 'px';
-          canvas.style.height = h + 'px';
-          chart.resize(w, h);
-        } else {
-          chart.resize();
-        }
+        var chart = Chart.getChart(c);
+        if (chart) chart.resize();
       } catch (e) { /* 忽略 */ }
     });
   }
