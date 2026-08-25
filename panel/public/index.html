@@ -19,6 +19,9 @@
         <circle cx="20" cy="7" r="1.4" fill="currentColor" stroke="none"/>
       </svg>
       <span>TS6 管理面板</span>
+      <button class="sidebar-close" id="sidebar-close"
+        onclick="var s=document.getElementById('sidebar'),o=document.getElementById('sidebar-overlay');s.classList.remove('open');s.style.transform='';o.classList.remove('active')"
+        title="关闭侧边栏">&times;</button>
     </div>
     <nav class="sidebar-nav">
       <a href="#/deploy" data-page="deploy">
