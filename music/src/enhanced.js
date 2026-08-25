@@ -10,7 +10,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const QRCode = require('qrcode');
 const { config } = require('./config');
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36';
@@ -64,6 +63,9 @@ function cookieHeader() {
 async function req(pathname, { method = 'GET', qs = {} } = {}) {
   const url = new URL(config.apiBase + pathname);
   qs.timestamp = Date.now(); // 防缓存
+  // 登录后请求携带 cookie 参数（接口兼容 cookie 字段，登录态以此生效）
+  const ck = cookieHeader();
+  if (ck) qs.cookie = ck;
   for (const [k, v] of Object.entries(qs)) {
     if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
   }
@@ -71,7 +73,7 @@ async function req(pathname, { method = 'GET', qs = {} } = {}) {
     'User-Agent': UA,
     Referer: 'https://music.163.com',
     Accept: 'application/json',
-    Cookie: cookieHeader(),
+    Cookie: ck,
   };
   let res;
   try {
@@ -92,7 +94,7 @@ async function anonymousToken() {
   return req('/register/anonymous', { method: 'POST' });
 }
 
-// 生成登录二维码，返回 Base64 图片数据
+// 生成登录二维码：使用接口返回的 base64 图片（qrimg），而非本地再生成
 async function qrCreate() {
   await anonymousToken().catch(() => {});
   const keyRes = await req('/login/qr/key');
@@ -100,10 +102,13 @@ async function qrCreate() {
   if (!key) throw new Error('获取二维码 key 失败：' + JSON.stringify(keyRes).slice(0, 200));
   const createRes = await req('/login/qr/create', { qs: { key, qrimg: 'true', noloading: 'true' } });
   const data = createRes && createRes.data;
+  // 接口返回 base64 二维码图片（可能是原始 base64，也可能已带 data:image 前缀）
   let qrDataUrl = null;
-  try {
-    qrDataUrl = await QRCode.toDataURL(data.qrurl || '');
-  } catch (e) { /* 二维码库失败则跳过 */ }
+  if (data.qrimg) {
+    qrDataUrl = String(data.qrimg).startsWith('data:image')
+      ? data.qrimg
+      : 'data:image/png;base64,' + data.qrimg;
+  }
   return { key, qrurl: data.qrurl, unikey: data.unikey, qrDataUrl };
 }
 
