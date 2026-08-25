@@ -235,32 +235,21 @@
     }
   }
 
-  // ---------- 侧边栏开关（脚本加载时立即绑定，不依赖 start()） ----------
-  const _sidebar = document.getElementById('sidebar');
-  const _overlay = document.getElementById('sidebar-overlay');
-  const _menuBtn = document.getElementById('menu-toggle');
-  if (_menuBtn) {
-    _menuBtn.onclick = function () {
-      _sidebar.classList.toggle('open');
-      _overlay.classList.toggle('active');
-    };
-  }
-  if (_overlay) {
-    _overlay.onclick = function () {
-      _sidebar.classList.remove('open');
-      _overlay.classList.remove('active');
-    };
-  }
-  if (_sidebar) {
-    _sidebar.querySelectorAll('.sidebar-nav a').forEach(function (a) {
-      a.addEventListener('click', function () {
-        if (window.innerWidth <= 1024) {
-          _sidebar.classList.remove('open');
-          _overlay.classList.remove('active');
-        }
+  // ---------- 侧边栏导航点击后自动收起（移动端） ----------
+  (function () {
+    var sidebar = document.getElementById('sidebar');
+    var overlay = document.getElementById('sidebar-overlay');
+    if (sidebar) {
+      sidebar.querySelectorAll('.sidebar-nav a').forEach(function (a) {
+        a.addEventListener('click', function () {
+          if (window.innerWidth <= 1024) {
+            sidebar.classList.remove('open');
+            if (overlay) overlay.classList.remove('active');
+          }
+        });
       });
-    });
-  }
+    }
+  })();
 
   // ---------- 启动 ----------
   // 竞态防护：boot 必须等所有同步脚本（deploy/dashboard/users/channels.js）

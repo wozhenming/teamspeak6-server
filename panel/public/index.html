@@ -51,12 +51,13 @@
   </aside>
 
   <!-- 移动端侧边栏遮罩 -->
-  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="document.getElementById('sidebar').classList.remove('open');this.classList.remove('active')"></div>
 
   <main class="main">
     <header class="topbar">
       <div class="topbar-left">
-        <button class="btn btn-sm menu-toggle" id="menu-toggle" title="菜单">
+        <button class="btn btn-sm menu-toggle" id="menu-toggle" title="菜单"
+          onclick="document.getElementById('sidebar').classList.toggle('open');document.getElementById('sidebar-overlay').classList.toggle('active')">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <h2 id="page-title">仪表盘</h2>
