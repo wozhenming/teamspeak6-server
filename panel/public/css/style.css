@@ -138,9 +138,16 @@ a { color: var(--accent); text-decoration: none; }
   border: none;
   color: var(--text);
   cursor: pointer;
-  padding: 4px;
+  padding: 6px;
+  margin: -6px;
   flex: none;
+  min-width: 36px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
 }
+.menu-toggle:hover { background: var(--bg-hover); }
 
 /* ---------- 响应式布局 ---------- */
 @media (max-width: 1024px) {
@@ -157,6 +164,10 @@ a { color: var(--accent); text-decoration: none; }
   .menu-toggle { display: flex; }
   .page-content { padding: 16px; }
   .topbar { padding: 12px 16px; }
+
+  /* 表格横向滚动 */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { min-width: 650px; }
 }
 
 @media (max-width: 768px) {
@@ -164,46 +175,51 @@ a { color: var(--accent); text-decoration: none; }
   .grid-2 { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
   .stat-card .stat-value { font-size: 22px; }
-  .card { padding: 14px 16px; }
-  .btn { min-height: 40px; }
-  .btn-sm { min-height: 32px; padding: 6px 12px; }
+  .card { padding: 14px 16px; overflow: hidden; }
+  .card h3 { font-size: 14px; }
+  .btn { min-height: 40px; font-size: 13px; }
+  .btn-sm { min-height: 32px; padding: 6px 12px; font-size: 12px; }
   .modal { width: calc(100vw - 32px); margin: 16px; }
   .login-card { width: calc(100vw - 32px); padding: 24px; }
   .topbar-right .muted { display: none; }
+  .topbar-right { gap: 8px; }
+  .range-btns { flex-wrap: wrap; }
+  .range-btns .btn { min-height: 28px; padding: 4px 8px; font-size: 11px; }
+  .term { max-height: 180px; font-size: 11px; }
+  .term-tall { max-height: 240px; }
+  .chart-box { height: 200px; }
+  .hint-box { font-size: 12px; }
+
+  /* 表单输入适配（防止 iOS 自动缩放） */
+  .select, .input, input[type="text"], input[type="password"], input[type="number"] {
+    font-size: 16px;
+    padding: 10px 14px;
+  }
+  .deploy-form .form-row { gap: 10px; }
+
+  /* 频道树适配 */
+  .channel-children { margin-left: 12px; }
+  .channel-node { padding: 5px 6px; font-size: 13px; }
 }
 
 @media (max-width: 480px) {
   .grid-4 { grid-template-columns: 1fr; }
   .stat-card .stat-value { font-size: 20px; }
-  .page-content { padding: 12px; }
-  .topbar { padding: 10px 12px; }
-  .topbar h2 { font-size: 16px; }
+  .page-content { padding: 10px; }
+  .topbar { padding: 8px 10px; }
+  .topbar h2 { font-size: 15px; }
+  .topbar-left { gap: 6px; }
   .cmd-box { flex-direction: column; align-items: stretch; }
-  .cmd-box .btn { align-self: flex-start; }
-  table { font-size: 13px; }
-  th, td { padding: 8px 10px; }
-  .range-btns { flex-wrap: wrap; }
-}
+  .cmd-box .btn { align-self: flex-start; margin-top: 4px; }
+  table { font-size: 12.5px; }
+  th, td { padding: 6px 8px; }
+  .card h3 { font-size: 13.5px; }
+  .grid { gap: 10px; }
 
-/* ---------- 移动端表格横向滚动 ---------- */
-@media (max-width: 1024px) {
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .table-wrap table { min-width: 600px; }
-}
-
-/* ---------- 移动端终端日志适配 ---------- */
-@media (max-width: 768px) {
-  .term { max-height: 200px; font-size: 11px; }
-  .term-tall { max-height: 260px; }
-}
-
-/* ---------- 移动端表单输入适配 ---------- */
-@media (max-width: 768px) {
-  .select, .input, input[type="text"], input[type="password"], input[type="number"] {
-    font-size: 16px; /* 防止 iOS 自动缩放 */
-    padding: 10px 14px;
-  }
-  .deploy-form .form-row { gap: 10px; }
+  /* 部署页特殊适配 */
+  .cred-box { font-size: 12px; padding: 8px 10px; }
+  .yaml-preview { font-size: 11px; max-height: 160px; }
+  .modal-body { padding: 12px; }
 }
 
 /* ---------- 通用组件 ---------- */
@@ -214,7 +230,16 @@ a { color: var(--accent); text-decoration: none; }
   padding: 18px 20px;
   box-shadow: var(--shadow);
 }
-.card h3 { font-size: 14.5px; margin-bottom: 14px; color: var(--text); display: flex; align-items: center; justify-content: space-between; }
+.card h3 {
+  font-size: 14.5px;
+  margin-bottom: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 .grid { display: grid; gap: 16px; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
