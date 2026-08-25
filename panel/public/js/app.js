@@ -244,6 +244,7 @@
         a.addEventListener('click', function () {
           if (window.innerWidth <= 1024) {
             sidebar.classList.remove('open');
+            sidebar.style.transform = '';
             if (overlay) overlay.classList.remove('active');
           }
         });
