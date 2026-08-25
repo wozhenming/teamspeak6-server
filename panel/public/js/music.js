@@ -94,7 +94,7 @@ TSPages.music = async function () {
   }
   function thumb(cover) {
     if (!cover) return '';
-    return `<img class="song-thumb" src="${API.musicImg(cover)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
+    return `<img class="song-thumb" src="${API.musicImg(cover, '80y80')}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
   }
   function fmtDur(sec) {
     if (!sec) return '0:00';
@@ -130,7 +130,7 @@ TSPages.music = async function () {
   function renderPlayer() {
     if (token !== TSUtils.navToken()) return;
     const st = playerState;
-    $('player-cover').src = st.current && st.current.cover ? API.musicImg(st.current.cover) : '';
+    $('player-cover').src = st.current && st.current.cover ? API.musicImg(st.current.cover, '112y112') : '';
     $('player-title').textContent = st.current ? st.current.title : '未在播放';
     $('player-artists').textContent = st.current ? (st.current.artists || '') : '';
     $('player-mode').textContent = st.queueLength ? `（队列 ${st.queueLength} 首）` : '';

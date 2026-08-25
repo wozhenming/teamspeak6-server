@@ -105,6 +105,11 @@ const API = (function () {
     musicLoop: (mode) => request('POST', '/api/music/player/loop', { mode }),
 
     // 图片代理：返回同源 URL，绕过网易云外链防盗链 / 混合内容限制
-    musicImg: (u) => '/api/music/img?u=' + encodeURIComponent(u || ''),
+    // size 形如 '80y80'，会拼到网易云封面 URL 的 ?param= 上以控制分辨率
+    musicImg: (u, size) => {
+      let t = u || '';
+      if (size) t += (t.indexOf('?') >= 0 ? '&' : '?') + 'param=' + size;
+      return '/api/music/img?u=' + encodeURIComponent(t);
+    },
   };
 })();
