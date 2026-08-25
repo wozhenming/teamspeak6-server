@@ -117,7 +117,7 @@ a { color: var(--accent); text-decoration: none; }
 .conn-status.online .dot { background: var(--green); }
 .conn-status.offline .dot { background: var(--red); }
 
-.main { margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; }
+.main { margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; transition: margin-left .2s ease; }
 
 .topbar {
   display: flex;
@@ -159,19 +159,14 @@ a { color: var(--accent); text-decoration: none; }
 .menu-toggle:hover { background: var(--bg-hover); }
 .menu-toggle:active { background: var(--bg-hover); opacity: 0.8; }
 
-/* ---------- 响应式布局 ---------- */
+/* 汉堡按钮始终显示（侧边栏可在任意尺寸折叠） */
+.menu-toggle { display: flex; }
+
 @media (max-width: 1024px) {
   .sidebar {
     transform: translateX(-100%);
   }
-  .sidebar.open {
-    transform: translateX(0);
-  }
-  .sidebar-overlay.active {
-    display: block;
-  }
   .main { margin-left: 0; }
-  .menu-toggle { display: flex; }
   .page-content { padding: 16px; }
   .topbar { padding: 12px 16px; }
 

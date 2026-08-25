@@ -239,12 +239,14 @@
   (function () {
     var sidebar = document.getElementById('sidebar');
     var overlay = document.getElementById('sidebar-overlay');
+    var main = document.getElementById('main');
     if (sidebar) {
       sidebar.querySelectorAll('.sidebar-nav a').forEach(function (a) {
         a.addEventListener('click', function () {
           if (window.innerWidth <= 1024) {
             sidebar.classList.remove('open');
             sidebar.style.transform = '';
+            if (main) main.style.marginLeft = '';
             if (overlay) overlay.classList.remove('active');
           }
         });
