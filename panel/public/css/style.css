@@ -136,7 +136,7 @@ a { color: var(--accent); text-decoration: none; }
 .conn-status.online .dot { background: var(--green); }
 .conn-status.offline .dot { background: var(--red); }
 
-.main { margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; transition: margin-left .2s ease; }
+.main { margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; transition: margin-left .2s ease; overflow-x: hidden; }
 
 .topbar {
   display: flex;

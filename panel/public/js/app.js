@@ -27,6 +27,36 @@
     });
   }
 
+  // ResizeObserver：监听所有 .chart-box 容器尺寸变化，自动 resize 图表
+  // （解决侧边栏折叠改变容器宽度时 Chart.js 不自动重绘的问题）
+  if ('ResizeObserver' in window) {
+    var chartRo = new ResizeObserver(function (entries) {
+      entries.forEach(function (entry) {
+        var canvas = entry.target.querySelector('canvas');
+        if (canvas && typeof Chart !== 'undefined') {
+          try {
+            var chart = Chart.getChart(canvas);
+            if (chart) chart.resize();
+          } catch (e) { /* 忽略 */ }
+        }
+      });
+    });
+    // 页面切换时会重新注入 .chart-box，用 MutationObserver 监听动态添加
+    var bodyObs = new MutationObserver(function () {
+      document.querySelectorAll('.chart-box').forEach(function (el) {
+        if (!el.dataset.observed) {
+          el.dataset.observed = '1';
+          try { chartRo.observe(el); } catch (e) { /* 忽略 */ }
+        }
+      });
+    });
+    bodyObs.observe(document.body, { childList: true, subtree: true });
+    document.querySelectorAll('.chart-box').forEach(function (el) {
+      el.dataset.observed = '1';
+      try { chartRo.observe(el); } catch (e) { /* 忽略 */ }
+    });
+  }
+
   // ---------- 全局工具 ----------
   // SVG 图标集（Feather 风格，统一替代 emoji）
   const ICON = (paths, extra) =>
