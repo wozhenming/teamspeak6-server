@@ -79,7 +79,8 @@ async function req(pathname, { method = 'GET', qs = {} } = {}) {
   try {
     res = await fetch(url, { method, headers });
   } catch (e) {
-    throw new Error(`无法连接网易云 API（${config.apiBase}）：${e.message}`);
+    const cause = e.cause ? ` [${e.cause.code || e.cause.message}]` : '';
+    throw new Error(`无法连接网易云 API（${config.apiBase}）：${e.message}${cause}`);
   }
   const setCookie = res.headers.get('set-cookie');
   if (setCookie) absorb(setCookie);

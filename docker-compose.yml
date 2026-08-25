@@ -78,6 +78,12 @@ services:
       - NCMAPI_COOKIE=/app/data/cookie
     volumes:
       - neteasemusic-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - ts6
 
@@ -94,7 +100,8 @@ services:
     volumes:
       - music-data:/app/data               # 持久化网易云 cookie 与点歌队列
     depends_on:
-      - neteasemusic
+      neteasemusic:
+        condition: service_healthy
     networks:
       - ts6
 
