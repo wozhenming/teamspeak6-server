@@ -16,6 +16,11 @@ const config = {
   // api-enhanced（网易云 API）内网地址
   apiBase: env('NCMAPI_BASE', 'http://neteasemusic:3000'),
 
+  // 图片代理上游：留空则 music-bot 直接抓取封面；
+  // 若 music-bot 容器无外网，可指向 neteasemusic 容器内已开好的图片代理
+  // （如 http://neteasemusic:3100），借助其外网出口绕过防盗链。
+  imgProxy: env('NETEASE_IMG_PROXY', ''),
+
   // 数据持久化目录（cookie / 队列）
   dataDir: env('MUSIC_DATA_DIR', '/app/data'),
 };

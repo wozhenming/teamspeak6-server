@@ -1,8 +1,61 @@
 const fs = require('fs')
 const path = require('path')
+const http = require('http')
+const https = require('https')
 
 const tmpPath = require('os').tmpdir()
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// 图片代理：本容器拥有外网出口，music-bot 可经此抓取网易云封面，
+// 规避其自身无外网或网易云外链防盗链的问题。
+const IMG_HOSTS = ['.music.126.net', '.music.163.com']
+function startImgProxy(port) {
+  http
+    .createServer((req, res) => {
+      let u
+      try {
+        u = new URL(req.url, 'http://localhost')
+      } catch (e) {
+        res.writeHead(400)
+        return res.end('bad url')
+      }
+      const target = u.searchParams.get('u')
+      let t
+      try {
+        t = new URL(target)
+      } catch (e) {
+        res.writeHead(400)
+        return res.end('bad target')
+      }
+      if (t.protocol !== 'http:' && t.protocol !== 'https:') {
+        res.writeHead(400)
+        return res.end('bad protocol')
+      }
+      if (!IMG_HOSTS.some((h) => t.hostname.endsWith(h))) {
+        res.writeHead(400)
+        return res.end('blocked host')
+      }
+      const lib = t.protocol === 'https:' ? https : http
+      const r = lib.get(
+        t,
+        { headers: { Referer: 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' } },
+        (up) => {
+          res.writeHead(up.statusCode || 200, {
+            'content-type': up.headers['content-type'] || 'image/jpeg',
+            'cache-control': 'public, max-age=86400',
+          })
+          up.pipe(res)
+        }
+      )
+      r.on('error', () => {
+        if (!res.headersSent) {
+          res.writeHead(502)
+          res.end('fetch error')
+        }
+      })
+    })
+    .listen(port, () => console.log('[img-proxy] listening on', port))
+}
 
 async function warmup() {
   const generateConfig = require('./generateConfig')
@@ -31,6 +84,7 @@ async function main() {
   require('./main')
   warmup()
   require('./server').serveNcmApi({ checkVersion: false })
+  startImgProxy(parseInt(process.env.IMG_PROXY_PORT || '3100', 10))
 }
 
 main()

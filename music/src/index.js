@@ -24,12 +24,26 @@ const IMG_HOSTS = ['.music.126.net', '.music.163.com'];
 app.get('/api/img', async (req, res) => {
   const u = req.query.u;
   if (!u || typeof u !== 'string') return res.status(400).send('missing u');
-  let url;
-  try { url = new URL(u); } catch (e) { return res.status(400).send('bad url'); }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return res.status(400).send('bad protocol');
-  if (!IMG_HOSTS.some((h) => url.hostname.endsWith(h))) return res.status(400).send('blocked host');
+  let target;
+  try { target = new URL(u); } catch (e) { return res.status(400).send('bad url'); }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return res.status(400).send('bad protocol');
+  if (!IMG_HOSTS.some((h) => target.hostname.endsWith(h))) return res.status(400).send('blocked host');
+
+  // 若配置了上游图片代理（通常是 neteasemusic 容器，拥有外网出口），则转发给它
+  if (config.imgProxy) {
+    const upstream = config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(target.toString());
+    try {
+      const r = await fetch(upstream, { redirect: 'follow' });
+      if (!r.ok) return res.status(r.status).send('upstream ' + r.status);
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=86400');
+      return res.send(buf);
+    } catch (e) { return res.status(502).send('img proxy error'); }
+  }
+
   try {
-    const r = await fetch(url.toString(), {
+    const r = await fetch(target.toString(), {
       headers: { 'Referer': 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' },
       redirect: 'follow',
     });

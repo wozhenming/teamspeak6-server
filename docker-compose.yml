@@ -85,6 +85,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+    # 图片代理端口（仅内网，供 music-bot 抓取网易云封面，借本容器外网出口）
+    expose:
+      - "3100"
     networks:
       - ts6
 
@@ -97,6 +100,7 @@ services:
       - MUSIC_HOST=0.0.0.0
       - MUSIC_BOT_PORT=3200
       - NCMAPI_BASE=http://neteasemusic:3000   # api-enhanced 内网地址
+      - NETEASE_IMG_PROXY=http://neteasemusic:3100   # 经 neteasemusic 容器出口抓取封面（其有外网）
       - MUSIC_DATA_DIR=/app/data
     volumes:
       - music-data:/app/data               # 持久化网易云 cookie 与点歌队列

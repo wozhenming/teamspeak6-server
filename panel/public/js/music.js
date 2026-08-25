@@ -261,7 +261,7 @@ TSPages.music = async function () {
            <tbody>${d.items.map(s => `<tr>
              <td class="song-cell">${thumb(s.cover)}<span>${esc(s.name)} <span class="muted">- ${esc(s.artists)}</span></span></td>
              <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
-            <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
+            <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration, cover: s.cover }).replace(/"/g, '&quot;')}'>点歌</button></td>
           </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       }
     } catch (e) {
@@ -312,7 +312,7 @@ TSPages.music = async function () {
         <tbody>${list.slice(start, start + pageSize).map(t => `<tr>
            <td class="song-cell">${thumb(t.cover)}<span>${esc(t.name)} <span class="muted">- ${esc(t.artists)}</span></span></td>
              <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
-          <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
+           <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover }).replace(/"/g, '&quot;')}'>点歌</button></td>
         </tr>`).join('')}</tbody></table></div>${pager(page, pages, (p) => { page = p; render(); })}
         <div class="modal-footer">
           <button class="btn btn-primary" id="pl-add-all">全部加入队列（${all.length}）</button>
@@ -320,7 +320,7 @@ TSPages.music = async function () {
         </div>`;
       box.querySelector('#pl-add-all').onclick = async () => {
         try {
-          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration })));
+          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover })));
           TSUtils.toast(`已加入 ${r.count} 首`, 'success');
           refreshQueue();
         } catch (err) { TSUtils.toast(err.message, 'error'); }
