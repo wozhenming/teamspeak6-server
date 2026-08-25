@@ -124,7 +124,7 @@ services:
   # 注意：后端服务名必须是 backend（前端镜像的 nginx 反代上游写死为 backend）。
   backend:
     image: clusterzx/ts6-manager:backend
-    container_name: ts6mgr-backend
+    container_name: ts6-backend
     restart: unless-stopped
     environment:
       - NODE_ENV=production
