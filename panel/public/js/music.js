@@ -66,21 +66,11 @@ TSPages.music = async function () {
         </span>
       </h3>
       <div id="ts-status" class="muted" style="font-size:12.5px">未连接</div>
-      <details class="ts-cfg">
-        <summary style="cursor:pointer;font-size:12.5px;margin-top:8px">配置 ts6-manager 与 TeamSpeak 连接</summary>
-        <div style="margin-top:10px;display:grid;gap:8px">
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">ts6-manager 地址</span><input class="input" id="ts-url" placeholder="http://backend:3001"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">管理员账号</span><input class="input" id="ts-user"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">管理员密码</span><input class="input" id="ts-pass" type="password"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">加入频道名</span><input class="input" id="ts-channel" placeholder="如：音乐厅"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">机器人 ID（可选，留空自动建）</span><input class="input" id="ts-botid" placeholder="如：1"></div>
-          <div style="border-top:1px solid var(--border);margin:4px 0"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">TeamSpeak 主机</span><input class="input" id="ts-host" placeholder="teamspeak"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">WebQuery 端口</span><input class="input" id="ts-wqport" placeholder="10080"></div>
-          <div style="display:flex;flex-direction:column;gap:3px"><span class="muted" style="font-size:12px">WebQuery API Key</span><input class="input" id="ts-key" placeholder="与面板相同的 Key"></div>
-          <button class="btn btn-sm btn-primary" id="btn-ts-save" style="justify-self:start">保存配置</button>
-        </div>
-      </details>
+      <div style="display:flex;flex-direction:column;gap:3px;margin-top:10px">
+        <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
+        <input class="input" id="ts-channel" placeholder="如：音乐厅 / 大厅" style="flex:1">
+      </div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px">ts6-manager 与 TeamSpeak 连接已自动配置，无需填写；只需点“连接到频道”。</div>
     </div>
 
     <div class="card">
@@ -400,7 +390,6 @@ TSPages.music = async function () {
     try {
       const st = await API.musicTsStatus();
       const box = $('ts-status');
-      if (!st.enabled) { box.textContent = '未启用（在 .env 配置 TS6MGR_URL/USER/PASS 与频道）'; return; }
       if (st.error) { box.textContent = '连接异常：' + st.error; return; }
       const np = st.nowPlaying ? `${st.nowPlaying.title || ''}${st.nowPlaying.artist ? ' - ' + st.nowPlaying.artist : ''}` : '';
       box.textContent = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道') + (np ? '　正在播放：' + np : '');
@@ -409,6 +398,8 @@ TSPages.music = async function () {
   $('btn-ts-link').onclick = async () => {
     try {
       TSUtils.toast('正在连接 TeamSpeak…', 'success');
+      // 先保存频道，再连接（其余配置由后端自动套用默认值）
+      await API.musicTsSaveConfig({ ts6mgrChannel: $('ts-channel').value.trim() });
       const r = await API.musicTsLink();
       TSUtils.toast('已连接：bot #' + r.botId, 'success');
       refreshTsStatus();
@@ -421,33 +412,9 @@ TSPages.music = async function () {
   async function loadTsConfig() {
     try {
       const c = await API.musicTsConfig();
-      $('ts-url').value = c.ts6mgrUrl || '';
-      $('ts-user').value = c.ts6mgrUser || '';
-      $('ts-pass').value = c.ts6mgrPass || '';
       $('ts-channel').value = c.ts6mgrChannel || '';
-      $('ts-botid').value = c.ts6mgrBotId || '';
-      $('ts-host').value = c.tsHost || '';
-      $('ts-wqport').value = c.tsWebqueryPort || 10080;
-      $('ts-key').value = c.tsApiKey || '';
     } catch (e) { /* 忽略 */ }
   }
-  $('btn-ts-save').onclick = async () => {
-    const payload = {
-      ts6mgrUrl: $('ts-url').value.trim(),
-      ts6mgrUser: $('ts-user').value.trim(),
-      ts6mgrPass: $('ts-pass').value,
-      ts6mgrChannel: $('ts-channel').value.trim(),
-      ts6mgrBotId: $('ts-botid').value.trim(),
-      tsHost: $('ts-host').value.trim(),
-      tsWebqueryPort: $('ts-wqport').value.trim() || 10080,
-      tsApiKey: $('ts-key').value.trim(),
-    };
-    try {
-      await API.musicTsSaveConfig(payload);
-      TSUtils.toast('配置已保存', 'success');
-      refreshTsStatus();
-    } catch (e) { TSUtils.toast('保存失败：' + e.message, 'error'); }
-  };
   loadTsConfig();
   refreshTsStatus();
 

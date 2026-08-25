@@ -37,13 +37,33 @@ async function authFetch(method, path, token, body) {
   return { status: r.status, json };
 }
 
-async function login() {
+async function tryLogin(user, pass) {
   const c = cfg();
-  const { status, json } = await authFetch('POST', '/api/auth/login', null, { username: c.user, password: c.pass });
+  const { status, json } = await authFetch('POST', '/api/auth/login', null, { username: user, password: pass });
   if (status !== 200 || !json) throw new Error('ts6-manager 登录失败 (HTTP ' + status + ')');
   const token = (json.data && (json.data.token || json.data.accessToken)) || json.token || json.accessToken;
   if (!token) throw new Error('ts6-manager 登录未返回 token');
   return token;
+}
+
+// 自动确保 ts6-manager 存在管理员账号（无需手动去 :3002 注册）：
+// 1) 先用配置的账号密码登录；2) 旧版镜像默认 admin/admin；3) 新版镜像走 /api/setup 首次向导
+async function ensureAdmin() {
+  const c = cfg();
+  try { return await tryLogin(c.user, c.pass); } catch (e) { /* 继续 */ }
+  try { return await tryLogin('admin', 'admin'); } catch (e) { /* 继续 */ }
+  const setup = await authFetch('POST', '/api/setup', null, {
+    username: c.user, password: c.pass, email: c.user + '@local',
+  });
+  if (setup.status === 200 || setup.status === 201) return await tryLogin(c.user, c.pass);
+  throw new Error('无法登录/创建 ts6-manager 管理员，请在 ' + c.url + '/setup 手动创建后重试');
+}
+
+// 解析 TeamSpeak WebQuery API Key：优先用配置/环境变量；否则提示在 .env 设置
+async function resolveApiKey() {
+  const c = cfg();
+  if (c.tsApiKey) return c.tsApiKey;
+  throw new Error('未配置 TeamSpeak API Key：请在 .env 设置 TS_API_KEY（在 TS 服务器执行 `apikeyadd scope=manage lifetime=0` 获取后填入）');
 }
 
 async function getServers(token) {
@@ -56,21 +76,19 @@ async function getServers(token) {
 
 // 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建
 async function ensureServer(token, c) {
+  const apiKey = await resolveApiKey();
   const list = await getServers(token);
   const existing = list.find((s) => s && (s.host === c.tsHost || (c.tsHost && s.host && s.host.includes(c.tsHost))));
   if (existing) return existing.id;
-  if (!c.tsHost || !c.tsApiKey) {
-    throw new Error('未配置 TeamSpeak 连接（主机/API Key），请在面板填写或在 ts6-manager 的 Settings → Connections 添加');
-  }
   const created = await authFetch('POST', '/api/servers', token, {
     name: 'TeamSpeak',
     host: c.tsHost,
     webqueryPort: c.tsWebqueryPort,
-    apiKey: c.tsApiKey,
+    apiKey,
   });
   if (created.status !== 201 && created.status !== 200) {
     const msg = (created.json && (created.json.error && created.json.error.message)) || ('HTTP ' + created.status);
-    throw new Error('自动创建 TS 连接失败（' + msg + '）；请在 ts6-manager 的 Settings → Connections 手动添加');
+    throw new Error('自动创建 TS 连接失败（' + msg + '）；请确认 TS_API_KEY 正确');
   }
   const s = (created.json && (created.json.data || created.json));
   return s.id;
@@ -129,10 +147,7 @@ async function ensureBot(token, serverConfigId) {
 
 async function link() {
   const c = cfg();
-  if (!c.url || !c.user || !c.pass) {
-    throw new Error('未配置 ts6-manager（地址 / 账号 / 密码）');
-  }
-  const token = await login();
+  const token = await ensureAdmin();
   const serverConfigId = await ensureServer(token, c);
   const botId = await ensureBot(token, serverConfigId);
   const stationId = await ensureStation(token, serverConfigId);
@@ -142,13 +157,14 @@ async function link() {
   if (play.status !== 200) {
     throw new Error('播放电台失败 (HTTP ' + play.status + ')');
   }
+  // 持久化 botId，避免重复连接时反复新建机器人
+  try { config.saveTsBridge({ ts6mgrBotId: String(botId) }); } catch (e) { /* 忽略 */ }
   return { ok: true, botId, stationId, serverConfigId };
 }
 
 async function unlink() {
   const c = cfg();
-  if (!c.url || !c.user || !c.pass) throw new Error('未配置 ts6-manager');
-  const token = await login();
+  const token = await ensureAdmin();
   const bots = await getBots(token);
   const botId = c.botId || (bots[0] && bots[0].id);
   if (!botId) throw new Error('未找到音乐机器人');
@@ -158,9 +174,11 @@ async function unlink() {
 
 async function status() {
   const c = cfg();
-  if (!c.url || !c.user || !c.pass) return { enabled: false };
+  let token;
+  try { token = await tryLogin(c.user, c.pass); } catch (e) {
+    try { token = await tryLogin('admin', 'admin'); } catch (e2) { return { enabled: true, connected: false }; }
+  }
   try {
-    const token = await login();
     const bots = await getBots(token);
     const botId = c.botId || (bots[0] && bots[0].id);
     if (!botId) return { enabled: true, connected: false };
@@ -169,7 +187,7 @@ async function status() {
     const bot = (json.data && json.data.bot) || json.data || json;
     return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null };
   } catch (e) {
-    return { enabled: true, error: e.message };
+    return { enabled: true, connected: false, error: e.message };
   }
 }
 

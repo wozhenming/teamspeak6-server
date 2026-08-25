@@ -51,7 +51,7 @@ services:
       - PANEL_PASSWORD=${PANEL_PASSWORD:-admin123}   # ⚠️ 生产环境务必通过 .env 修改
       - SESSION_SECRET=${SESSION_SECRET:-please-change-me}
       - TSSERVER_BASE_URL=http://teamspeak:10080      # 容器网络内访问 TS6 WebQuery
-      - TSSERVER_API_KEY=${TSSERVER_API_KEY:-}        # 也可在「部署管理」页填写（持久化）
+      - TSSERVER_API_KEY=${TS_API_KEY:-${TSSERVER_API_KEY:-}}        # 与音乐机器人共用 TS WebQuery Key（也可在「部署管理」页填写）
       - TSSERVER_CONTAINER_NAME=teamspeak-server
       - PANEL_RUN_MODE=container               # 容器化模式：部署页操作/日志对接主机 Docker
       - PANEL_ENV_FILE=/app/config/panel.env   # API Key 等配置持久化位置
@@ -102,13 +102,20 @@ services:
       - NCMAPI_BASE=http://neteasemusic:3000   # api-enhanced 内网地址
       - NETEASE_IMG_PROXY=http://neteasemusic:3100   # 经 neteasemusic 容器出口抓取封面（其有外网）
       - MUSIC_DATA_DIR=/app/data
-      # ts6-manager 对接（点歌机器人进入 TeamSpeak）；全部留空则不启用 TS 推流
+      # ts6-manager 对接（点歌机器人进入 TeamSpeak）。以下均有默认值，开箱即用，
+      # 面板只需填写“频道”。如默认值不合用，改这里覆盖即可。
       - TS6MGR_URL=${TS6MGR_URL:-}
       - TS6MGR_USER=${TS6MGR_USER:-}
       - TS6MGR_PASS=${TS6MGR_PASS:-}
       - TS6MGR_BOT_ID=${TS6MGR_BOT_ID:-}
       - TS6MGR_CHANNEL=${TS6MGR_CHANNEL:-}
       - STREAM_PUBLIC_URL=http://music:3200/api/stream
+      # TeamSpeak 连接（自动建连）。TS_API_KEY 与面板共用；如留空则需在 .env 配置。
+      - TS_HOST=${TS_HOST:-teamspeak}
+      - TS_WEBQUERY_PORT=${TS_WEBQUERY_PORT:-10080}
+      - TS_API_KEY=${TS_API_KEY:-}
+      # 可选：设置后可用于首次自动生成 TS API Key（无需手动 apikeyadd）
+      - TS_QUERY_ADMIN_PASSWORD=${TS_QUERY_ADMIN_PASSWORD:-}
     volumes:
       - music-data:/app/data               # 持久化网易云 cookie 与点歌队列
     depends_on:

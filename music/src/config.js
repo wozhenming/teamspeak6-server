@@ -24,48 +24,51 @@ const config = {
   // （如 http://neteasemusic:3100），借助其外网出口绕过防盗链。
   imgProxy: env('NETEASE_IMG_PROXY', ''),
 
-  // ts6-manager 对接（点歌机器人语音引擎）：留空表示不启用 TS 推流
-  ts6mgrUrl: env('TS6MGR_URL', ''),
-  ts6mgrUser: env('TS6MGR_USER', ''),
-  ts6mgrPass: env('TS6MGR_PASS', ''),
+  // ts6-manager 对接（点歌机器人语音引擎）。以下均有默认值，开箱即用，
+  // 面板只需填写“频道”。改 .env 可覆盖；面板保存的配置会持久化覆盖这里。
+  ts6mgrUrl: env('TS6MGR_URL', 'http://backend:3001'),
+  ts6mgrUser: env('TS6MGR_USER', 'tsbot'),
+  ts6mgrPass: env('TS6MGR_PASS', 'tsbot123'),
   ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
   ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
   // ts6-manager 拉取本服务音频流所用的地址（同网络内用 music:3200）
   streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://music:3200/api/stream'),
-  // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，面板可编辑）
-  tsHost: env('TS_HOST', ''),
+  // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，自动建连）
+  tsHost: env('TS_HOST', 'teamspeak'),
   tsWebqueryPort: parseInt(env('TS_WEBQUERY_PORT', '10080'), 10),
   tsApiKey: env('TS_API_KEY', ''),
+  // TS 服务器管理员密码（仅用于首次自动生成 API Key；留空则需手动在 .env 配 TS_API_KEY）
+  tsQueryAdminPassword: env('TS_QUERY_ADMIN_PASSWORD', ''),
 };
 
-// 持久化桥接配置（面板可编辑，覆盖上面的环境变量）
+// 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
 const tsBridgeFile = path.join(config.dataDir, 'tsbridge.json');
 function loadTsBridge() {
   try {
     const o = JSON.parse(fs.readFileSync(tsBridgeFile, 'utf8'));
-    config.ts6mgrUrl = o.ts6mgrUrl != null ? o.ts6mgrUrl : config.ts6mgrUrl;
-    config.ts6mgrUser = o.ts6mgrUser != null ? o.ts6mgrUser : config.ts6mgrUser;
-    config.ts6mgrPass = o.ts6mgrPass != null ? o.ts6mgrPass : config.ts6mgrPass;
-    config.ts6mgrBotId = o.ts6mgrBotId != null ? o.ts6mgrBotId : config.ts6mgrBotId;
-    config.ts6mgrChannel = o.ts6mgrChannel != null ? o.ts6mgrChannel : config.ts6mgrChannel;
-    config.streamPublicUrl = o.streamPublicUrl || config.streamPublicUrl;
-    config.tsHost = o.tsHost != null ? o.tsHost : config.tsHost;
-    config.tsWebqueryPort = o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort;
-    config.tsApiKey = o.tsApiKey != null ? o.tsApiKey : config.tsApiKey;
+    if (o.ts6mgrUrl) config.ts6mgrUrl = o.ts6mgrUrl;
+    if (o.ts6mgrUser) config.ts6mgrUser = o.ts6mgrUser;
+    if (o.ts6mgrPass) config.ts6mgrPass = o.ts6mgrPass;
+    if (o.ts6mgrBotId) config.ts6mgrBotId = o.ts6mgrBotId;
+    if (o.ts6mgrChannel) config.ts6mgrChannel = o.ts6mgrChannel;
+    if (o.streamPublicUrl) config.streamPublicUrl = o.streamPublicUrl;
+    if (o.tsHost) config.tsHost = o.tsHost;
+    if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
+    if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
 config.saveTsBridge = (o) => {
   const next = {
-    ts6mgrUrl: o.ts6mgrUrl || '',
-    ts6mgrUser: o.ts6mgrUser || '',
-    ts6mgrPass: o.ts6mgrPass || '',
-    ts6mgrBotId: o.ts6mgrBotId || '',
-    ts6mgrChannel: o.ts6mgrChannel || '',
-    streamPublicUrl: o.streamPublicUrl || 'http://music:3200/api/stream',
-    tsHost: o.tsHost || '',
-    tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : 10080,
-    tsApiKey: o.tsApiKey || '',
+    ts6mgrUrl: (o.ts6mgrUrl || '').trim() || config.ts6mgrUrl,
+    ts6mgrUser: (o.ts6mgrUser || '').trim() || config.ts6mgrUser,
+    ts6mgrPass: (o.ts6mgrPass || '').trim() || config.ts6mgrPass,
+    ts6mgrBotId: (o.ts6mgrBotId || '').trim() || config.ts6mgrBotId,
+    ts6mgrChannel: (o.ts6mgrChannel || '').trim() || config.ts6mgrChannel,
+    streamPublicUrl: (o.streamPublicUrl || '').trim() || config.streamPublicUrl,
+    tsHost: (o.tsHost || '').trim() || config.tsHost,
+    tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
+    tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }
