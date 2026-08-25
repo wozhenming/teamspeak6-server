@@ -10,14 +10,12 @@ TSPages.dashboard = async function () {
   const content = document.getElementById('page-content');
   const sid = TSUtils.sid() || 1;
 
-  // 时间范围（分钟）：30 分钟 / 1 小时 / 6 小时 / 24 小时 / 3 天 / 7 天
+  // 时间范围（分钟）：仪表盘最多 24 小时
   const RANGES = [
     { m: 30, label: '30分' },
     { m: 60, label: '1小时' },
     { m: 360, label: '6小时' },
     { m: 1440, label: '24小时' },
-    { m: 4320, label: '3天' },
-    { m: 10080, label: '7天' },
   ];
   let range = 60;
   let historyCache = []; // { t, clients, up, down }（升序）

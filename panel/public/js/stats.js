@@ -17,6 +17,7 @@ TSPages.stats = async function () {
     return Math.floor(s / 86400) + ' 天前';
   };
 
+  // 数据统计页：全量数据（最多 7 天）
   const RANGES = [
     { m: 30, label: '30分' },
     { m: 60, label: '1小时' },
