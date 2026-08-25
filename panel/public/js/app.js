@@ -12,6 +12,7 @@
     users: { title: '用户管理', render: () => TSPages.users() },
     channels: { title: '频道管理', render: () => TSPages.channels() },
     stats: { title: '数据统计', render: () => TSPages.stats() },
+    music: { title: '点歌', render: () => TSPages.music() },
   };
 
   let currentSid = null;

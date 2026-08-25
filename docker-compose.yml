@@ -55,6 +55,7 @@ services:
       - TSSERVER_CONTAINER_NAME=teamspeak-server
       - PANEL_RUN_MODE=container               # 容器化模式：部署页操作/日志对接主机 Docker
       - PANEL_ENV_FILE=/app/config/panel.env   # API Key 等配置持久化位置
+      - MUSIC_BASE_URL=http://music:3200        # 点歌机器人（后端代理）
     volumes:
       - panel-config:/app/config               # 持久化面板配置（API Key 等）
       - /var/run/docker.sock:/var/run/docker.sock   # 读取 TS6 容器日志/凭证、快捷启停
@@ -63,9 +64,45 @@ services:
     networks:
       - ts6
 
+  # ---------- 网易云音乐 API（api-enhanced，点歌机器人歌曲来源） ----------
+  neteasemusic:
+    build:
+      context: .
+      dockerfile: music/api-enhanced.Dockerfile
+    container_name: neteasemusic
+    restart: unless-stopped
+    environment:
+      - PORT=3000                      # 仅内网，不暴露宿主端口
+      # 数据持久化（匿名 token / 缓存）
+      - NCMAPI_CONFIG=/app/data/config.json
+      - NCMAPI_COOKIE=/app/data/cookie
+    volumes:
+      - neteasemusic-data:/app/data
+    networks:
+      - ts6
+
+  # ---------- 点歌机器人（music-bot） ----------
+  music:
+    build: ./music
+    container_name: ts6-music-bot
+    restart: unless-stopped
+    environment:
+      - MUSIC_HOST=0.0.0.0
+      - MUSIC_BOT_PORT=3200
+      - NCMAPI_BASE=http://neteasemusic:3000   # api-enhanced 内网地址
+      - MUSIC_DATA_DIR=/app/data
+    volumes:
+      - music-data:/app/data               # 持久化网易云 cookie 与点歌队列
+    depends_on:
+      - neteasemusic
+    networks:
+      - ts6
+
 volumes:
   teamspeak-data:
   panel-config:
+  neteasemusic-data:
+  music-data:
 
 networks:
   ts6:

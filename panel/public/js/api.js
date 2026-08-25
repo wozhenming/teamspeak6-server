@@ -79,5 +79,16 @@ const API = (function () {
     // 数据统计
     statsOverview: () => request('GET', '/api/stats/overview'),
     statsConnections: (limit) => request('GET', `/api/stats/connections?limit=${limit || 200}`),
+
+    // 点歌机器人
+    musicStatus: () => request('GET', '/api/music/status'),
+    musicQrCreate: () => request('POST', '/api/music/qr/create'),
+    musicQrCheck: (key) => request('GET', `/api/music/qr/check?key=${encodeURIComponent(key)}`),
+    musicSearch: (q, type, limit, offset) => request('GET', `/api/music/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit || 20}&offset=${offset || 0}`),
+    musicPlaylistTracks: (id, limit) => request('GET', `/api/music/playlist/tracks?id=${id}&limit=${limit || 30}`),
+    musicQueue: () => request('GET', '/api/music/queue'),
+    musicEnqueue: (song) => request('POST', '/api/music/queue', song),
+    musicDequeue: (id) => request('DELETE', `/api/music/queue/${id}`),
+    musicClearQueue: () => request('DELETE', '/api/music/queue'),
   };
 })();

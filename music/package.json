@@ -1,0 +1,16 @@
+{
+  "name": "ts6-music-bot",
+  "version": "1.0.0",
+  "description": "TeamSpeak 6 点歌机器人（网易云音乐 api-enhanced 来源）",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "qrcode": "^1.5.3"
+  },
+  "license": "Apache-2.0"
+}

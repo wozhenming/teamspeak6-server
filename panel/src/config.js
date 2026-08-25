@@ -55,6 +55,9 @@ const config = {
   credentialFile: path.join(path.dirname(envFile), 'ts6-credentials.txt'),
   // 指标采样历史持久化文件（仪表盘图表重启不丢）
   metricsFile: path.join(path.dirname(envFile), 'ts6-metrics.json'),
+
+  // 点歌机器人（music-bot）内网地址（后端代理）
+  musicBaseUrl: env('MUSIC_BASE_URL', 'http://music:3200'),
 };
 
 /**
