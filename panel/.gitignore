@@ -5,3 +5,4 @@ node_modules/
 ts6-boot.log
 ts6-credentials.txt
 ts6-metrics.json
+ts6-users.json

@@ -392,6 +392,9 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .hint-body { line-height: 1.9; }
 .hint-body .mono { color: var(--text); }
 
+.user-online td { background: rgba(46, 204, 113, .04); }
+.user-offline td { opacity: .6; }
+
 /* ---------- 时间范围按钮 ---------- */
 .range-btns { display: inline-flex; gap: 4px; }
 .range-btn.active {

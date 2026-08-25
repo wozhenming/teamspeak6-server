@@ -11,6 +11,7 @@
 
 const { config } = require('./config');
 const { ts } = require('./webquery');
+const usersDb = require('./users-db');
 
 const SAMPLE_MS = 5000;
 const MAX_POINTS = 24 * 60 * 60 / 5;   // 24 小时 @5s
@@ -45,7 +46,7 @@ async function sample() {
     }
 
     // 追踪新加入用户（过滤 ServerQuery 客户端）
-    const channelById = new Map(channels.map((c) => [Number(c.cid), c]));
+    const channelById = new Map(channels.map((c) => [Number(c.cid), c.channel_name || '']));
     const current = new Set();
     const now = Date.now();
     for (const c of clients) {
@@ -57,13 +58,16 @@ async function sample() {
           clid,
           nickname: c.client_nickname || '?',
           uid: c.client_unique_identifier || '',
-          channel_name: (channelById.get(Number(c.cid)) || {}).channel_name || '',
+          channel_name: channelById.get(Number(c.cid)) || '',
           joined_at: now,
         });
       }
     }
     knownClients = current;
     if (recentClients.length > MAX_RECENT) recentClients.length = MAX_RECENT;
+
+    // 用户历史数据库同步（在线/离线检测 + 连接记录）
+    usersDb.updateOnline(clients, channelById);
   } catch (e) {
     // 静默：WebQuery 不可用时跳过本轮
   }
@@ -71,6 +75,7 @@ async function sample() {
 
 function start() {
   if (timer) return;
+  usersDb.start(); // 启动用户历史数据库
   load();
   sample();
   timer = setInterval(sample, SAMPLE_MS);

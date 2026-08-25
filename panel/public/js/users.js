@@ -12,33 +12,53 @@ TSPages.users = async function () {
 
   content.innerHTML = `
     <div class="card">
-      <h3>在线用户 <span class="muted" id="user-count"></span></h3>
+      <h3>用户管理 <span class="muted" id="user-count"></span></h3>
+      <div class="muted" style="font-size:12.5px;margin-bottom:10px">
+        在线用户可执行操作（踢出/封禁/移动/私聊/Poke），离线用户仅查看历史连接记录。
+      </div>
       <div class="table-wrap">
         <table>
           <thead><tr>
             <th>昵称</th><th>UID</th><th>频道</th><th>国家</th>
-            <th>连接时长</th><th>空闲<span class="muted" title="距用户上次活动（说话/操作）的时间，活动后重新计时"> ⓘ</span></th><th class="actions">操作</th>
+            <th>连接时长</th><th>空闲<span class="muted" title="距用户上次活动（说话/操作）的时间，活动后重新计时"> ⓘ</span></th>
+            <th>状态</th><th class="actions">操作</th>
           </tr></thead>
-          <tbody id="user-tbody"><tr><td colspan="7"><div class="empty">加载中…</div></td></tr></tbody>
+          <tbody id="user-tbody"><tr><td colspan="8"><div class="empty">加载中…</div></td></tr></tbody>
         </table>
       </div>
     </div>`;
 
+  function ago(tsMs) {
+    if (!tsMs) return '-';
+    const s = Math.max(0, Math.floor((Date.now() - tsMs) / 1000));
+    if (s < 60) return '刚刚';
+    if (s < 3600) return Math.floor(s / 60) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    return Math.floor(s / 86400) + ' 天前';
+  }
+
   async function load() {
     const data = await API.clients(sid);
     const tbody = document.getElementById('user-tbody');
-    document.getElementById('user-count').textContent = `（${data.clients.length} 人）`;
-    if (!data.clients.length) {
-      tbody.innerHTML = '<tr><td colspan="7"><div class="empty">暂无在线用户</div></td></tr>';
+    const online = data.clients || [];
+    const offline = data.offline_users || [];
+    const total = online.length + offline.length;
+    document.getElementById('user-count').textContent = `（${online.length} 在线 / ${total} 总）`;
+
+    if (!total) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty">暂无用户记录</div></td></tr>';
       return;
     }
-    tbody.innerHTML = data.clients.map(c => `<tr>
-      <td>${TSUtils.escapeHtml(c.nickname)}${c.is_serveradmin ? ' <span class="badge red">SA</span>' : ''}${c.is_query ? ' <span class="badge blue">Query</span>' : ''}</td>
+
+    // 在线用户（可操作）
+    const onlineRows = online.map(c => `<tr class="user-online">
+      <td>${TSUtils.escapeHtml(c.nickname)}${c.is_query ? ' <span class="badge blue">Query</span>' : ''}</td>
       <td class="mono muted" title="${TSUtils.escapeHtml(c.uid || '')}">${TSUtils.escapeHtml((c.uid || '-').slice(0, 12))}…</td>
       <td>${TSUtils.escapeHtml(c.channel_name || '')}</td>
       <td>${TSUtils.escapeHtml(c.country || '-')}</td>
       <td>${TSUtils.fmtDuration(c.connected_seconds)}</td>
       <td title="距上次活动的时间，用户说话/操作后会重新计时">${TSUtils.fmtDuration(c.idle_seconds)}</td>
+      <td><span class="badge green">在线</span></td>
       <td class="actions">
         <button class="btn btn-sm" data-act="poke" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">Poke</button>
         <button class="btn btn-sm" data-act="msg" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">私聊</button>
@@ -46,7 +66,21 @@ TSPages.users = async function () {
         <button class="btn btn-sm" data-act="kick" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">踢出</button>
         <button class="btn btn-sm btn-danger" data-act="ban" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">封禁</button>
       </td>
-    </tr>`).join('');
+    </tr>`);
+
+    // 离线用户（不可操作）
+    const offlineRows = offline.map(u => `<tr class="user-offline">
+      <td>${TSUtils.escapeHtml(u.nickname)}</td>
+      <td class="mono muted" title="${TSUtils.escapeHtml(u.uid || '')}">${TSUtils.escapeHtml((u.uid || '-').slice(0, 12))}…</td>
+      <td class="muted">-</td>
+      <td>${TSUtils.escapeHtml(u.country || '-')}</td>
+      <td class="muted">-</td>
+      <td class="muted">-</td>
+      <td><span class="badge">离线</span> <span class="muted" style="font-size:12px">${ago(u.last_seen)}</span></td>
+      <td class="actions"><span class="muted">离线不可操作</span></td>
+    </tr>`);
+
+    tbody.innerHTML = onlineRows.join('') + offlineRows.join('');
   }
 
   // ---------- 操作处理 ----------

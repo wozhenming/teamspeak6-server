@@ -75,5 +75,9 @@ const API = (function () {
     deploySetApiKey: (key) => request('POST', '/api/deploy/apikey', { key }),
     deployGenerateKey: (body) => request('POST', '/api/deploy/apikey/generate', body || {}),
     deployCheck: () => request('GET', '/api/deploy/check'),
+
+    // 数据统计
+    statsOverview: () => request('GET', '/api/stats/overview'),
+    statsConnections: (limit) => request('GET', `/api/stats/connections?limit=${limit || 200}`),
   };
 })();

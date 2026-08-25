@@ -13,6 +13,7 @@
 const express = require('express');
 const { ts } = require('../webquery');
 const { smoothIdle, smoothConnected } = require('../utils/smooth');
+const usersDb = require('../users-db');
 
 const router = express.Router({ mergeParams: true });
 
@@ -42,7 +43,7 @@ function mapClient(c, info) {
   };
 }
 
-// 在线用户列表
+// 用户管理：返回所有用户（在线 + 离线历史），在线用户可操作，离线用户仅查看
 router.get('/', async (req, res, next) => {
   try {
     const sid = sidOf(req);
@@ -50,7 +51,6 @@ router.get('/', async (req, res, next) => {
     const channelById = new Map(channels.map(c => [Number(c.cid), c]));
 
     // 连接时长等扩展字段来自 clientinfo（clientlist -times 只提供 idle/created/lastconnected）
-    // 仅对真实语音客户端查询（ServerQuery 客户端无这些数据）
     const voiceClients = clients.filter(c => String(c.client_type) !== '1');
     const infos = await Promise.all(voiceClients.map(c =>
       ts.clientinfo(sid, Number(c.clid)).catch(() => null)
@@ -60,12 +60,35 @@ router.get('/', async (req, res, next) => {
       if (infos[i]) infoByClid.set(Number(c.clid), infos[i]);
     });
 
-    const list = clients.map(c => {
+    // 在线用户
+    const onlineList = clients.map(c => {
       const m = mapClient(c, infoByClid.get(Number(c.clid)));
       m.channel_name = (channelById.get(m.cid) || {}).channel_name || '';
+      m.online = true;
       return m;
     });
-    res.json({ ok: true, data: { clients: list } });
+
+    // 离线用户（从历史数据库）
+    const onlineUids = new Set(clients.map(c => c.client_unique_identifier).filter(Boolean));
+    const offlineUsers = usersDb.getAllUsers()
+      .filter((u) => !onlineUids.has(u.uid))
+      .map((u) => ({
+        clid: null,
+        cid: null,
+        nickname: u.nickname,
+        uid: u.uid,
+        country: u.country || '',
+        channel_name: '',
+        connected_seconds: null,
+        idle_seconds: null,
+        away: false,
+        is_query: false,
+        online: false,
+        last_seen: u.last_seen,
+        total_connections: u.total_connections,
+      }));
+
+    res.json({ ok: true, data: { clients: onlineList, offline_users: offlineUsers } });
   } catch (err) {
     next(err);
   }

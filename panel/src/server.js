@@ -51,6 +51,7 @@ apiRouter.use('/servers', require('./routes/servers'));
 apiRouter.use('/servers/:sid/clients', require('./routes/clients'));
 apiRouter.use('/servers/:sid/channels', require('./routes/channels'));
 apiRouter.use('/deploy', require('./routes/deploy'));
+apiRouter.use('/stats', require('./routes/stats'));
 
 // ---------- 静态资源 ----------
 app.use(express.static(config.publicDir));

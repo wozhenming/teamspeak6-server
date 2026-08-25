@@ -11,6 +11,7 @@
     dashboard: { title: '仪表盘', render: () => TSPages.dashboard() },
     users: { title: '用户管理', render: () => TSPages.users() },
     channels: { title: '频道管理', render: () => TSPages.channels() },
+    stats: { title: '数据统计', render: () => TSPages.stats() },
   };
 
   let currentSid = null;
