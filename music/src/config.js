@@ -21,6 +21,15 @@ const config = {
   // （如 http://neteasemusic:3100），借助其外网出口绕过防盗链。
   imgProxy: env('NETEASE_IMG_PROXY', ''),
 
+  // ts6-manager 对接（点歌机器人语音引擎）：留空表示不启用 TS 推流
+  ts6mgrUrl: env('TS6MGR_URL', ''),
+  ts6mgrUser: env('TS6MGR_USER', ''),
+  ts6mgrPass: env('TS6MGR_PASS', ''),
+  ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
+  ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
+  // ts6-manager 拉取本服务音频流所用的地址（同网络内用 music:3200）
+  streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://music:3200/api/stream'),
+
   // 数据持久化目录（cookie / 队列）
   dataDir: env('MUSIC_DATA_DIR', '/app/data'),
 };

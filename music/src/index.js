@@ -3,10 +3,12 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 const { config } = require('./config');
 const enhanced = require('./enhanced');
 const queue = require('./queue');
 const player = require('./player');
+const tsbridge = require('./tsbridge');
 
 const app = express();
 app.disable('x-powered-by');
@@ -53,6 +55,84 @@ app.get('/api/img', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=86400');
     res.send(buf);
   } catch (e) { res.status(502).send('fetch error'); }
+});
+
+// ---------- 连续电台流（供 ts6-manager 音乐机器人作为电台源拉流） ----------
+// 把当前点歌队列当作“网络电台”持续输出：逐首解析网易云直链并管道输出，
+// 一曲结束后自动下一首；用户在面板切歌/暂停时本流自动跟随。
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+app.get('/api/stream', async (req, res) => {
+  res.set('Content-Type', 'audio/mpeg');
+  res.set('Cache-Control', 'no-cache');
+  res.set('Connection', 'keep-alive');
+  res.set('Transfer-Encoding', 'chunked');
+  res.flushHeaders && res.flushHeaders();
+
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  const pump = async () => {
+    while (!closed) {
+      let st = player.get();
+      if (!st.current) {
+        if (queue.all().length) { player.play(); st = player.get(); }
+        else { await sleep(1000); continue; }
+      }
+      if (!st.playing) { await sleep(500); continue; }
+
+      const curId = st.current.id;
+      let audioUrl = '';
+      try { audioUrl = (await enhanced.songUrl(curId)).url || ''; } catch (e) { audioUrl = ''; }
+      if (!audioUrl) { player.next(); await sleep(300); continue; }
+
+      try {
+        // 经 neteasemusic 出口代理抓取音频（music-bot 可能无外网）
+        const source = config.imgProxy
+          ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
+          : audioUrl;
+        const up = await fetch(source);
+        if (!up.ok || !up.body) { player.next(); await sleep(300); continue; }
+        const nodeStream = Readable.fromWeb(up.body);
+        await new Promise((resolve) => {
+          let aborted = false;
+          const check = () => {
+            const cur = player.get().current;
+            if (!cur || cur.id !== curId) { aborted = true; nodeStream.destroy(); }
+          };
+          nodeStream.on('data', (chunk) => {
+            check();
+            if (aborted) return;
+            if (!res.write(chunk)) {
+              nodeStream.pause();
+              res.once('drain', () => { if (!aborted) nodeStream.resume(); });
+            }
+          });
+          nodeStream.on('end', resolve);
+          nodeStream.on('error', resolve);
+          req.on('close', () => { aborted = true; nodeStream.destroy(); resolve(); });
+        });
+      } catch (e) { /* 忽略单首错误，进入下一首 */ }
+
+      if (closed) break;
+      // 自然播放结束 -> 前进
+      if (player.get().current && player.get().current.id === curId) player.next();
+      await sleep(200);
+    }
+    if (!res.writableEnded) res.end();
+  };
+  pump();
+});
+
+// ---------- ts6-manager 对接（点歌机器人进入 TeamSpeak） ----------
+app.get('/api/ts-bot/status', async (req, res) => {
+  try { ok(res, await tsbridge.status()); } catch (e) { ok(res, { enabled: false, error: e.message }); }
+});
+app.post('/api/ts-bot/link', async (req, res) => {
+  try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
+});
+app.post('/api/ts-bot/unlink', async (req, res) => {
+  try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
 
 // ---------- 登录状态 ----------

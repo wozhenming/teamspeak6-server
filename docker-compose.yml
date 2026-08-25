@@ -102,6 +102,13 @@ services:
       - NCMAPI_BASE=http://neteasemusic:3000   # api-enhanced 内网地址
       - NETEASE_IMG_PROXY=http://neteasemusic:3100   # 经 neteasemusic 容器出口抓取封面（其有外网）
       - MUSIC_DATA_DIR=/app/data
+      # ts6-manager 对接（点歌机器人进入 TeamSpeak）；全部留空则不启用 TS 推流
+      - TS6MGR_URL=${TS6MGR_URL:-}
+      - TS6MGR_USER=${TS6MGR_USER:-}
+      - TS6MGR_PASS=${TS6MGR_PASS:-}
+      - TS6MGR_BOT_ID=${TS6MGR_BOT_ID:-}
+      - TS6MGR_CHANNEL=${TS6MGR_CHANNEL:-}
+      - STREAM_PUBLIC_URL=http://music:3200/api/stream
     volumes:
       - music-data:/app/data               # 持久化网易云 cookie 与点歌队列
     depends_on:
@@ -110,11 +117,62 @@ services:
     networks:
       - ts6
 
+  # ---------- ts6-manager（点歌机器人的语音引擎，复用其音乐机器人） ----------
+  # 它作为真实语音客户端加入 TS 频道，把音频推流进频道。连接信息在 ts6-manager
+  # 管理界面（默认 http://<主机>:3002）的 Settings → Connections 中填写：
+  #   Host = teamspeak，WebQuery 端口 = 10080，API Key = 与面板相同的 WebQuery Key。
+  ts6mgr-backend:
+    image: clusterzx/ts6-manager:backend
+    container_name: ts6mgr-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=file:/app/packages/backend/data/ts6webui.db
+      - JWT_SECRET=${TS6MGR_JWT_SECRET:-change-me-ts6mgr}
+      - ENCRYPTION_KEY=${TS6MGR_ENCRYPTION_KEY:-}
+      - TS_ALLOW_SELF_SIGNED=${TS6MGR_ALLOW_SELF_SIGNED:-false}
+      - JWT_ACCESS_EXPIRY=15m
+      - JWT_REFRESH_EXPIRY=7d
+      - FRONTEND_URL=${TS6MGR_FRONTEND_URL:-http://localhost:3002}
+      - MUSIC_DIR=/data/music
+      - SIDECAR_URL=http://ts6mgr-sidecar:9800
+    volumes:
+      - ts6mgr-data:/app/packages/backend/data
+      - ts6mgr-music:/data/music
+    depends_on:
+      - ts6mgr-sidecar
+      - teamspeak
+    networks:
+      - ts6
+
+  ts6mgr-sidecar:
+    image: clusterzx/ts6-manager:sidecar
+    container_name: ts6mgr-sidecar
+    restart: unless-stopped
+    environment:
+      - SIDECAR_PORT=9800
+    networks:
+      - ts6
+
+  ts6mgr-frontend:
+    image: clusterzx/ts6-manager:frontend
+    container_name: ts6mgr-frontend
+    restart: unless-stopped
+    ports:
+      - "${TS6MGR_PORT:-3002}:80"
+    depends_on:
+      - ts6mgr-backend
+    networks:
+      - ts6
+
 volumes:
   teamspeak-data:
   panel-config:
   neteasemusic-data:
   music-data:
+  ts6mgr-data:
+  ts6mgr-music:
 
 networks:
   ts6:

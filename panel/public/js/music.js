@@ -59,6 +59,16 @@ TSPages.music = async function () {
     </div>
 
     <div class="card">
+      <h3><span>TeamSpeak 推流</span>
+        <span>
+          <button class="btn btn-sm btn-primary" id="btn-ts-link">连接到频道</button>
+          <button class="btn btn-sm" id="btn-ts-unlink">断开</button>
+        </span>
+      </h3>
+      <div id="ts-status" class="muted" style="font-size:12.5px">未连接（需在 .env 配置 TS6MGR_URL/USER/PASS 与频道）</div>
+    </div>
+
+    <div class="card">
       <h3><span>网易云点歌</span>
         <span>
           <button class="btn btn-sm" id="btn-login">扫码登录</button>
@@ -370,6 +380,31 @@ TSPages.music = async function () {
     refreshQueue();
   };
   $('queue-q').addEventListener('input', () => { queuePage = 1; refreshQueue(); });
+
+  async function refreshTsStatus() {
+    try {
+      const st = await API.musicTsStatus();
+      const box = $('ts-status');
+      if (!st.enabled) { box.textContent = '未启用（在 .env 配置 TS6MGR_URL/USER/PASS 与频道）'; return; }
+      if (st.error) { box.textContent = '连接异常：' + st.error; return; }
+      const np = st.nowPlaying ? `${st.nowPlaying.title || ''}${st.nowPlaying.artist ? ' - ' + st.nowPlaying.artist : ''}` : '';
+      box.textContent = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道') + (np ? '　正在播放：' + np : '');
+    } catch (e) { /* 忽略 */ }
+  }
+  $('btn-ts-link').onclick = async () => {
+    try {
+      TSUtils.toast('正在连接 TeamSpeak…', 'success');
+      const r = await API.musicTsLink();
+      TSUtils.toast('已连接：bot #' + r.botId, 'success');
+      refreshTsStatus();
+    } catch (e) { TSUtils.toast('连接失败：' + e.message, 'error'); }
+  };
+  $('btn-ts-unlink').onclick = async () => {
+    try { await API.musicTsUnlink(); TSUtils.toast('已断开推流', 'success'); refreshTsStatus(); }
+    catch (e) { TSUtils.toast('断开失败：' + e.message, 'error'); }
+  };
+  refreshTsStatus();
+
 
   $('search-results').addEventListener('click', async (e) => {
     const btn = e.target.closest('button');

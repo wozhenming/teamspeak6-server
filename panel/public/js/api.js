@@ -104,6 +104,11 @@ const API = (function () {
     musicPrev: () => request('POST', '/api/music/player/prev'),
     musicLoop: (mode) => request('POST', '/api/music/player/loop', { mode }),
 
+    // 点歌机器人接入 TeamSpeak（ts6-manager）
+    musicTsStatus: () => request('GET', '/api/music/ts-bot/status'),
+    musicTsLink: () => request('POST', '/api/music/ts-bot/link'),
+    musicTsUnlink: () => request('POST', '/api/music/ts-bot/unlink'),
+
     // 图片代理：返回同源 URL，绕过网易云外链防盗链 / 混合内容限制
     // size 形如 '80y80'，会拼到网易云封面 URL 的 ?param= 上以控制分辨率
     musicImg: (u, size) => {
