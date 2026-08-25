@@ -240,6 +240,26 @@
   // 执行完毕（DOMContentLoaded 触发时同步脚本必然已执行），否则快速刷新时
   // /api/me 先返回、页面脚本后下载，会报 "TSPages.xxx is not a function"
   function start() {
+    // 移动端侧边栏
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const menuBtn = document.getElementById('menu-toggle');
+    function closeSidebar() {
+      sidebar.classList.remove('open');
+      overlay.classList.remove('active');
+    }
+    if (menuBtn) {
+      menuBtn.onclick = () => {
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('active');
+      };
+    }
+    if (overlay) overlay.onclick = closeSidebar;
+    // 侧边栏导航点击后自动收起（移动端）
+    sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
+      a.addEventListener('click', () => { if (window.innerWidth <= 1024) closeSidebar(); });
+    });
+
     window.addEventListener('hashchange', navigate);
     document.getElementById('logout-btn').onclick = async () => {
       try { await API.logout(); } catch (e) { /* 忽略 */ }
