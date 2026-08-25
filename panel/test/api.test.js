@@ -28,7 +28,7 @@ async function check(name, cond, extra) {
 
 // ---------- 空闲/连接时长快照平滑单元验证 ----------
 async function testSmoothing() {
-  const { smoothIdle, smoothConnected } = require('../src/routes/clients');
+  const { smoothIdle, smoothConnected } = require('../src/utils/smooth');
   const CLID = 999001;
   const s1 = smoothIdle(CLID, 100);              // 首次：直接展示 100
   await check('空闲首次展示', s1 === 100, s1);

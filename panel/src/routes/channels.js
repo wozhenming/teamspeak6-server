@@ -10,6 +10,7 @@
 
 const express = require('express');
 const { ts } = require('../webquery');
+const { smoothIdle } = require('../utils/smooth');
 
 const router = express.Router({ mergeParams: true });
 
@@ -41,7 +42,7 @@ router.get('/', async (req, res, next) => {
       clid: Number(c.clid),
       cid: Number(c.cid),
       nickname: c.client_nickname || '?',
-      idle_seconds: c.client_idle_time != null ? c.client_idle_time : c.connection_idle_time,
+      idle_seconds: smoothIdle(Number(c.clid), c.client_idle_time != null ? c.client_idle_time : null),
     }));
     res.json({ ok: true, data: { channels, clients: mappedClients } });
   } catch (err) {
