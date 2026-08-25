@@ -16,6 +16,17 @@
 
   let currentSid = null;
 
+  // 侧边栏切换后调用：遍历页面内所有 canvas，通过 Chart.getChart 找到实例并 resize
+  window.resizeAllCharts = function resizeAllCharts() {
+    if (typeof Chart === 'undefined') return;
+    document.querySelectorAll('canvas').forEach(function (c) {
+      try {
+        var chart = Chart.getChart(c);
+        if (chart) chart.resize();
+      } catch (e) { /* 忽略 */ }
+    });
+  }
+
   // ---------- 全局工具 ----------
   // SVG 图标集（Feather 风格，统一替代 emoji）
   const ICON = (paths, extra) =>
@@ -247,7 +258,7 @@
             sidebar.classList.remove('open');
             sidebar.style.transform = '';
             if (overlay) overlay.classList.remove('active');
-            setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 250);
+            setTimeout(function () { resizeAllCharts(); }, 300);
           }
         });
       });

@@ -20,7 +20,7 @@
       </svg>
       <span>TS6 管理面板</span>
       <button class="sidebar-close" id="sidebar-close"
-        onclick="var s=document.getElementById('sidebar'),o=document.getElementById('sidebar-overlay');s.classList.remove('open');s.style.transform='';o.classList.remove('active');setTimeout(function(){window.dispatchEvent(new Event('resize'))},250)"
+        onclick="var s=document.getElementById('sidebar'),o=document.getElementById('sidebar-overlay');s.classList.remove('open');s.style.transform='';o.classList.remove('active');setTimeout(resizeAllCharts,300)"
         title="关闭侧边栏">&times;</button>
     </div>
     <nav class="sidebar-nav">
@@ -54,13 +54,13 @@
   </aside>
 
   <!-- 移动端侧边栏遮罩 -->
-  <div class="sidebar-overlay" id="sidebar-overlay" onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main');s.classList.remove('open');s.style.transform='';if(window.innerWidth>1024)m.style.marginLeft='';this.classList.remove('active');setTimeout(function(){window.dispatchEvent(new Event('resize'))},250)"></div>
+  <div class="sidebar-overlay" id="sidebar-overlay" onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main');s.classList.remove('open');s.style.transform='';if(window.innerWidth>1024)m.style.marginLeft='';this.classList.remove('active');setTimeout(resizeAllCharts,300)"></div>
 
   <main class="main" id="main">
     <header class="topbar">
       <div class="topbar-left">
         <button class="btn btn-sm menu-toggle" id="menu-toggle" title="菜单"
-          onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main'),o=document.getElementById('sidebar-overlay'),w=window.innerWidth>1024;s.classList.toggle('open');o.classList.toggle('active');if(s.classList.contains('open')){s.style.transform='translateX(0)';if(w)m.style.marginLeft='220px'}else{s.style.transform=w?'translateX(-220px)':'translateX(-100%)';if(w)m.style.marginLeft='0'}setTimeout(function(){window.dispatchEvent(new Event('resize'))},250)">>
+          onclick="var s=document.getElementById('sidebar'),m=document.getElementById('main'),o=document.getElementById('sidebar-overlay'),w=window.innerWidth>1024;s.classList.toggle('open');o.classList.toggle('active');if(s.classList.contains('open')){s.style.transform='translateX(0)';if(w)m.style.marginLeft='220px'}else{s.style.transform=w?'translateX(-220px)':'translateX(-100%)';if(w)m.style.marginLeft='0'}setTimeout(resizeAllCharts,300)">>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
         <h2 id="page-title">仪表盘</h2>
