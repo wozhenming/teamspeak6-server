@@ -247,6 +247,7 @@
             sidebar.classList.remove('open');
             sidebar.style.transform = '';
             if (overlay) overlay.classList.remove('active');
+            setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 250);
           }
         });
       });
