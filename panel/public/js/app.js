@@ -240,30 +240,31 @@
   // 执行完毕（DOMContentLoaded 触发时同步脚本必然已执行），否则快速刷新时
   // /api/me 先返回、页面脚本后下载，会报 "TSPages.xxx is not a function"
   function start() {
-    // 移动端侧边栏
     const sidebar = document.getElementById('sidebar');
     const overlay = document.getElementById('sidebar-overlay');
     const menuBtn = document.getElementById('menu-toggle');
-    function closeSidebar() {
-      sidebar.classList.remove('open');
-      overlay.classList.remove('active');
-    }
-    function toggleSidebar(e) {
-      if (e) { e.preventDefault(); e.stopPropagation(); }
-      sidebar.classList.toggle('open');
-      overlay.classList.toggle('active');
-    }
+
+    // 侧边栏开关
     if (menuBtn) {
-      menuBtn.addEventListener('click', toggleSidebar);
-      menuBtn.addEventListener('touchend', toggleSidebar);
+      menuBtn.onclick = function () {
+        sidebar.classList.toggle('open');
+        overlay.classList.toggle('active');
+      };
     }
     if (overlay) {
-      overlay.addEventListener('click', closeSidebar);
-      overlay.addEventListener('touchend', closeSidebar);
+      overlay.onclick = function () {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
+      };
     }
     // 侧边栏导航点击后自动收起（移动端）
-    sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
-      a.addEventListener('click', () => { if (window.innerWidth <= 1024) closeSidebar(); });
+    sidebar.querySelectorAll('.sidebar-nav a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        if (window.innerWidth <= 1024) {
+          sidebar.classList.remove('open');
+          overlay.classList.remove('active');
+        }
+      });
     });
 
     window.addEventListener('hashchange', navigate);
