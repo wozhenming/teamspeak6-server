@@ -10,12 +10,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const { config } = require('./config');
+const { config, envFile } = require('./config');
 
 const SAVE_INTERVAL_MS = 5 * 60 * 1000; // 每 5 分钟保存
 const MAX_CONNECTIONS = 5000;             // 最大连接记录条数
 
-const usersFile = path.join(path.dirname(config.envFile || path.join(__dirname, '..', '.env')), 'ts6-users.json');
+const usersFile = path.join(path.dirname(envFile || path.join(__dirname, '..', '.env')), 'ts6-users.json');
 
 // uid -> { nickname, uid, country, first_seen, last_seen, total_connections }
 const users = new Map();
