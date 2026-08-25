@@ -19,6 +19,28 @@ function fail(res, status, code, message) {
   res.status(status).json({ ok: false, error: { code, message } });
 }
 
+// ---------- 图片代理（绕过网易云外链防盗链 / 混合内容限制） ----------
+const IMG_HOSTS = ['.music.126.net', '.music.163.com'];
+app.get('/api/img', async (req, res) => {
+  const u = req.query.u;
+  if (!u || typeof u !== 'string') return res.status(400).send('missing u');
+  let url;
+  try { url = new URL(u); } catch (e) { return res.status(400).send('bad url'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return res.status(400).send('bad protocol');
+  if (!IMG_HOSTS.some((h) => url.hostname.endsWith(h))) return res.status(400).send('blocked host');
+  try {
+    const r = await fetch(url.toString(), {
+      headers: { 'Referer': 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' },
+      redirect: 'follow',
+    });
+    if (!r.ok) return res.status(r.status).send('upstream ' + r.status);
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch (e) { res.status(502).send('fetch error'); }
+});
+
 // ---------- 登录状态 ----------
 app.get('/api/status', async (req, res) => {
   try {

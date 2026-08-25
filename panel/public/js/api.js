@@ -103,5 +103,8 @@ const API = (function () {
     musicNext: () => request('POST', '/api/music/player/next'),
     musicPrev: () => request('POST', '/api/music/player/prev'),
     musicLoop: (mode) => request('POST', '/api/music/player/loop', { mode }),
+
+    // 图片代理：返回同源 URL，绕过网易云外链防盗链 / 混合内容限制
+    musicImg: (u) => '/api/music/img?u=' + encodeURIComponent(u || ''),
   };
 })();

@@ -92,6 +92,10 @@ TSPages.music = async function () {
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function thumb(cover) {
+    if (!cover) return '';
+    return `<img class="song-thumb" src="${API.musicImg(cover)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
+  }
   function fmtDur(sec) {
     if (!sec) return '0:00';
     sec = Math.floor(sec);
@@ -126,7 +130,7 @@ TSPages.music = async function () {
   function renderPlayer() {
     if (token !== TSUtils.navToken()) return;
     const st = playerState;
-    $('player-cover').src = st.current && st.current.cover ? st.current.cover : '';
+    $('player-cover').src = st.current && st.current.cover ? API.musicImg(st.current.cover) : '';
     $('player-title').textContent = st.current ? st.current.title : '未在播放';
     $('player-artists').textContent = st.current ? (st.current.artists || '') : '';
     $('player-mode').textContent = st.queueLength ? `（队列 ${st.queueLength} 首）` : '';
@@ -254,9 +258,9 @@ TSPages.music = async function () {
       } else {
         box.innerHTML = `<div style="font-size:12px" class="muted">共 ${fmtNum(d.total)} 首</div><div class="table-wrap"><table>
           <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
-          <tbody>${d.items.map(s => `<tr>
-            <td>${esc(s.name)} <span class="muted">- ${esc(s.artists)}</span></td>
-            <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
+           <tbody>${d.items.map(s => `<tr>
+             <td class="song-cell">${thumb(s.cover)}<span>${esc(s.name)} <span class="muted">- ${esc(s.artists)}</span></span></td>
+             <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
             <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
           </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       }
@@ -306,8 +310,8 @@ TSPages.music = async function () {
       box.innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
         <tbody>${list.slice(start, start + pageSize).map(t => `<tr>
-          <td>${esc(t.name)} <span class="muted">- ${esc(t.artists)}</span></td>
-          <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
+           <td class="song-cell">${thumb(t.cover)}<span>${esc(t.name)} <span class="muted">- ${esc(t.artists)}</span></span></td>
+             <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
           <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
         </tr>`).join('')}</tbody></table></div>${pager(page, pages, (p) => { page = p; render(); })}
         <div class="modal-footer">
@@ -344,7 +348,7 @@ TSPages.music = async function () {
         <thead><tr><th>#</th><th>歌曲</th><th>点歌人</th><th class="actions">操作</th></tr></thead>
         <tbody>${items.map((it, i) => `<tr>
           <td>${i + 1}</td>
-          <td>${esc(it.title)} <span class="muted">- ${esc(it.artists)}</span></td>
+           <td class="song-cell">${thumb(it.cover)}<span>${esc(it.title)} <span class="muted">- ${esc(it.artists)}</span></span></td>
           <td>${esc(it.requestedBy)}</td>
           <td class="actions">
             <button class="btn btn-sm" data-play="${it.id}">播放</button>

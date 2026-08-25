@@ -551,6 +551,10 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .player-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 .player-progress input[type=range] { flex: 1; accent-color: var(--accent); min-width: 120px; }
 
+/* 歌曲缩略图（经代理加载，规避网易云外链防盗链） */
+.song-cell { display: flex; align-items: center; gap: 10px; }
+.song-thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--bg); border: 1px solid var(--border); flex: none; }
+
 /* ---------- 列表筛选工具条 ---------- */
 .list-toolbar { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
