@@ -25,14 +25,6 @@
   const pageTimers = new Set();
 
   function trackTimer(id) { pageTimers.add(id); return id; }
-  window.TSUtils.navToken = () => navToken;
-  window.TSUtils.registerCleanup = (fn) => { if (typeof fn === 'function') pageCleanup = fn; };
-  window.TSUtils.setInterval = (fn, ms) => trackTimer(setInterval(fn, ms));
-  window.TSUtils.setTimeout = (fn, ms) => {
-    const id = setTimeout(() => { pageTimers.delete(id); fn(); }, ms);
-    pageTimers.add(id);
-    return id;
-  };
 
   // 侧边栏切换后调用：Chart.js 图表随容器重绘
   window.resizeAllCharts = function resizeAllCharts() {
@@ -95,6 +87,14 @@
       box: ICON('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>'),
       sun: ICON('<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>'),
       moon: ICON('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
+    },
+    navToken: () => navToken,
+    registerCleanup: (fn) => { if (typeof fn === 'function') pageCleanup = fn; },
+    setInterval: (fn, ms) => trackTimer(setInterval(fn, ms)),
+    setTimeout: (fn, ms) => {
+      const id = setTimeout(() => { pageTimers.delete(id); fn(); }, ms);
+      pageTimers.add(id);
+      return id;
     },
     sid() {
       return currentSid;
