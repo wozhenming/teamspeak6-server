@@ -9,6 +9,7 @@ window.TSPages = window.TSPages || {};
 TSPages.dashboard = async function () {
   const content = document.getElementById('page-content');
   const sid = TSUtils.sid() || 1;
+  const token = TSUtils.navToken();
 
   // 时间范围（分钟）：仪表盘最多 24 小时
   const RANGES = [
@@ -187,6 +188,7 @@ TSPages.dashboard = async function () {
   }
 
   async function loadRecent() {
+    if (token !== TSUtils.navToken()) return;
     try {
       const d = await API.recentClients();
       const list = d.clients || [];
@@ -217,6 +219,7 @@ TSPages.dashboard = async function () {
   }
 
   async function tick(initial) {
+    if (token !== TSUtils.navToken()) return;
     try {
       const ov = await API.overview(sid);
       if (ov.error) {
@@ -286,7 +289,6 @@ TSPages.dashboard = async function () {
   // ---------- 初始化 ----------
   await Promise.all([loadHistory(), loadRecent()]);
   await tick(true);
-  const timer = setInterval(() => tick(false), 5000);
-  const recentTimer = setInterval(loadRecent, 15000);
-  window.addEventListener('hashchange', () => { clearInterval(timer); clearInterval(recentTimer); }, { once: true });
+  TSUtils.setInterval(() => tick(false), 5000);
+  TSUtils.setInterval(loadRecent, 15000);
 };

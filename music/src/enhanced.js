@@ -161,6 +161,18 @@ async function playlistTracks(id, limit = 60, offset = 0) {
   }));
 }
 
+// 拉取歌单全部曲目（分页循环，封顶 cap 防止超长歌单拖垮），用于"全量加入队列"
+async function playlistTracksAll(id, cap = 2000) {
+  const pageSize = 300;
+  const out = [];
+  for (let offset = 0; offset < cap; offset += pageSize) {
+    const page = await playlistTracks(id, pageSize, offset);
+    out.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return out.slice(0, cap);
+}
+
 module.exports = {
   qrCreate,
   qrCheck,
@@ -170,4 +182,5 @@ module.exports = {
   songUrl,
   playlist,
   playlistTracks,
+  playlistTracksAll,
 };

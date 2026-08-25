@@ -17,6 +17,23 @@
 
   let currentSid = null;
 
+  // ---------- 页面生命周期：定时器登记与卸载 ----------
+  // 页面切换时统一清理上一页遗留的定时器与资源，避免快速切页时
+  // 旧页面的 setInterval 写入已销毁的 DOM（Cannot set ... of null）并造成页面卡死。
+  let pageCleanup = null;
+  let navToken = 0;
+  const pageTimers = new Set();
+
+  function trackTimer(id) { pageTimers.add(id); return id; }
+  window.TSUtils.navToken = () => navToken;
+  window.TSUtils.registerCleanup = (fn) => { if (typeof fn === 'function') pageCleanup = fn; };
+  window.TSUtils.setInterval = (fn, ms) => trackTimer(setInterval(fn, ms));
+  window.TSUtils.setTimeout = (fn, ms) => {
+    const id = setTimeout(() => { pageTimers.delete(id); fn(); }, ms);
+    pageTimers.add(id);
+    return id;
+  };
+
   // 侧边栏切换后调用：Chart.js 图表随容器重绘
   window.resizeAllCharts = function resizeAllCharts() {
     if (typeof Chart === 'undefined') return;
@@ -71,6 +88,10 @@
       zap: ICON('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>'),
       help: ICON('<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>'),
       lock: ICON('<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+      pause: ICON('<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'),
+      prev: ICON('<polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/>'),
+      next: ICON('<polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/>'),
+      shuffle: ICON('<polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 16 16 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/>'),
       box: ICON('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>'),
       sun: ICON('<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>'),
       moon: ICON('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'),
@@ -196,6 +217,10 @@
     document.querySelectorAll('.sidebar-nav a').forEach(a =>
       a.classList.toggle('active', a.dataset.page === name));
     document.getElementById('page-title').textContent = page.title;
+    if (pageCleanup) { try { pageCleanup(); } catch (e) { /* 忽略卸载异常 */ } pageCleanup = null; }
+    pageTimers.forEach((id) => { try { clearInterval(id); clearTimeout(id); } catch (e) { /* 忽略 */ } });
+    pageTimers.clear();
+    navToken++;
     try {
       await page.render();
     } catch (e) {

@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * 点歌页：网易云扫码登录 + 歌曲/歌单搜索 + 点歌队列。
+ * 点歌页：网易云扫码登录 + 歌曲/歌单搜索 + 点歌队列 + 播放器控制。
  */
 
 window.TSPages = window.TSPages || {};
@@ -11,8 +11,53 @@ TSPages.music = async function () {
   let searchType = 'song';
   let loginTimer = null;
 
+  // 搜索分页状态
+  let searchQ = '';
+  let searchPage = 1;
+  const searchPageSize = 20;
+
+  // 队列分页/筛选状态
+  let queueQ = '';
+  let queuePage = 1;
+  const queuePageSize = 10;
+
+  // 播放器本地插值状态
+  let playerState = { current: null, position: 0, playing: false, loopMode: 'all', queueLength: 0 };
+  let playerTick = null;
+  let pollTimer = null;
+  let lastPollAt = 0;
+  let seeking = false;
+
+  // 页面卸载令牌：切换走后异步回调靠它放弃写 DOM
+  const token = TSUtils.navToken();
+
   content.innerHTML = `
     <div id="music-alert"></div>
+
+    <div class="card music-player" id="player-card">
+      <h3><span>正在播放</span>
+        <span class="muted" id="player-mode"></span>
+      </h3>
+      <div class="player-main">
+        <img class="player-cover" id="player-cover" alt="" src="">
+        <div class="player-info">
+          <div class="player-title" id="player-title">未在播放</div>
+          <div class="muted" id="player-artists"></div>
+        </div>
+        <div class="player-controls">
+          <button class="btn btn-sm" id="btn-prev" title="上一首">${TSUtils.icons.prev}</button>
+          <button class="btn btn-sm btn-primary" id="btn-toggle" title="播放/暂停">${TSUtils.icons.play}</button>
+          <button class="btn btn-sm" id="btn-next" title="下一首">${TSUtils.icons.next}</button>
+          <button class="btn btn-sm" id="btn-loop" title="循环模式">循环:列表</button>
+        </div>
+      </div>
+      <div class="player-progress">
+        <span id="player-pos">0:00</span>
+        <input type="range" id="player-range" min="0" max="100" value="0" step="1">
+        <span id="player-dur">0:00</span>
+      </div>
+    </div>
+
     <div class="card">
       <h3><span>网易云点歌</span>
         <span>
@@ -33,10 +78,13 @@ TSPages.music = async function () {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3><span>点歌队列 <span class="muted" id="queue-count"></span></span>
+      <h3><span>点歌队列 <span class="muted" id="queue-summary"></span></span>
         <button class="btn btn-sm btn-danger" id="btn-clear-queue">清空</button>
       </h3>
-      <div id="queue-list"><div class="empty">队列为空</div></div>
+      <div class="list-toolbar">
+        <input type="text" id="queue-q" class="input" style="flex:1;min-width:160px" placeholder="筛选队列（歌曲/歌手/点歌人）">
+      </div>
+      <div id="queue-list" style="margin-top:10px"><div class="empty">队列为空</div></div>
     </div>`;
 
   const $ = (id) => document.getElementById(id);
@@ -45,7 +93,8 @@ TSPages.music = async function () {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function fmtDur(sec) {
-    if (!sec) return '';
+    if (!sec) return '0:00';
+    sec = Math.floor(sec);
     return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
   }
   function fmtNum(n) {
@@ -55,11 +104,76 @@ TSPages.music = async function () {
     return String(n);
   }
 
+  // ---------- 通用分页条 ----------
+  function pager(page, pages, onGo) {
+    if (pages <= 1) return '';
+    const mk = (label, p, dis) =>
+      `<button class="btn btn-sm pager-btn" data-p="${p}" ${dis ? 'disabled' : ''}>${label}</button>`;
+    return `<div class="pager">
+      ${mk('«', 1, page === 1)}
+      ${mk('‹', page - 1, page === 1)}
+      <span class="pager-info">${page} / ${pages}</span>
+      ${mk('›', page + 1, page >= pages)}
+      ${mk('»', pages, page >= pages)}
+    </div>`;
+  }
+
+  // ---------- 播放器 ----------
+  function loopLabel(m) {
+    return m === 'one' ? '循环:单曲' : m === 'shuffle' ? '循环:随机' : m === 'off' ? '循环:关' : '循环:列表';
+  }
+
+  function renderPlayer() {
+    if (token !== TSUtils.navToken()) return;
+    const st = playerState;
+    $('player-cover').src = st.current && st.current.cover ? st.current.cover : '';
+    $('player-title').textContent = st.current ? st.current.title : '未在播放';
+    $('player-artists').textContent = st.current ? (st.current.artists || '') : '';
+    $('player-mode').textContent = st.queueLength ? `（队列 ${st.queueLength} 首）` : '';
+    $('btn-toggle').innerHTML = st.playing ? TSUtils.icons.pause : TSUtils.icons.play;
+    $('btn-loop').textContent = loopLabel(st.loopMode);
+    const dur = st.current && st.current.duration ? st.current.duration : 0;
+    $('player-range').max = dur || 0;
+    if (!seeking) $('player-range').value = st.position || 0;
+    $('player-pos').textContent = fmtDur(st.position || 0);
+    $('player-dur').textContent = fmtDur(dur);
+  }
+
+  async function pollPlayer(force) {
+    if (token !== TSUtils.navToken()) return;
+    const now = Date.now();
+    if (!force && now - lastPollAt < 800) return;
+    lastPollAt = now;
+    try {
+      const d = await API.musicPlayer();
+      playerState = d;
+      renderPlayer();
+    } catch (e) { /* 服务不可用 */ }
+  }
+
+  // 本地插值：每秒推进进度条
+  function startTick() {
+    if (playerTick) return;
+    playerTick = TSUtils.setInterval(() => {
+      if (token !== TSUtils.navToken()) { clearInterval(playerTick); playerTick = null; return; }
+      const st = playerState;
+      if (st.playing && st.current && !seeking) {
+        const dur = st.current.duration || 0;
+        let pos = st.position + 1;
+        if (dur > 0 && pos >= dur) { pollPlayer(true); return; }
+        st.position = pos;
+        $('player-range').value = pos;
+        $('player-pos').textContent = fmtDur(pos);
+      }
+    }, 1000);
+  }
+
   async function refreshLogin() {
+    if (token !== TSUtils.navToken()) return;
     try {
       const d = await API.musicStatus();
       const el = $('login-state');
-      el.textContent = d.loggedIn ? '✓ 已登录网易云' : '未登录（登录后可播放受版权歌曲）';
+      el.textContent = d.loggedIn ? '已登录网易云' : '未登录（登录后可播放受版权歌曲）';
       el.style.color = d.loggedIn ? 'var(--green)' : 'var(--text-muted)';
     } catch (e) { /* 服务不可用 */ }
   }
@@ -85,19 +199,19 @@ TSPages.music = async function () {
         <div class="modal-footer"><button class="btn" id="qr-close">完成</button></div>`;
       body.querySelector('#qr-close').onclick = close;
       if (qr.qrDataUrl) {
-        loginTimer = setInterval(async () => {
+        loginTimer = TSUtils.setInterval(async () => {
           try {
             const r = await API.musicQrCheck(qr.key);
             const st = body.querySelector('#qr-status');
             if (!st) return;
             if (r.code === 803) {
               close();
-              TSUtils.toast('登录成功 ✓', 'success');
+              TSUtils.toast('登录成功', 'success');
             } else if (r.code === 802) {
               st.textContent = '已扫码，请在手机上确认登录…';
             } else if (r.code === 800) {
               st.textContent = '二维码已过期，请关闭重试';
-              clearInterval(loginTimer);
+              if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
             } else {
               st.textContent = '等待扫码…';
             }
@@ -113,24 +227,30 @@ TSPages.music = async function () {
   }
 
   // ---------- 搜索 ----------
-  async function doSearch() {
+  async function doSearch(page) {
+    if (page != null) searchPage = page;
     const q = $('search-q').value.trim();
     if (!q) return;
+    searchQ = q;
     const box = $('search-results');
     box.innerHTML = '<div class="empty">搜索中…</div>';
     try {
-      const d = await API.musicSearch(q, searchType, 20, 0);
+      const d = await API.musicSearch(q, searchType, searchPageSize, (searchPage - 1) * searchPageSize);
       if (!d.items || !d.items.length) {
         box.innerHTML = '<div class="empty">未找到结果</div>';
         return;
       }
+      const pages = Math.max(1, Math.ceil(d.total / searchPageSize));
       if (searchType === 'playlist') {
         box.innerHTML = `<div style="font-size:12px" class="muted">共 ${fmtNum(d.total)} 个歌单</div><div class="table-wrap"><table>
           <thead><tr><th>名称</th><th>曲目/播放</th><th>创建者</th><th class="actions">操作</th></tr></thead>
           <tbody>${d.items.map(p => `<tr>
             <td>${esc(p.name)}</td><td>${p.tracks} 首 · ${fmtNum(p.playCount)} 播放</td><td>${esc(p.creator)}</td>
-            <td class="actions"><button class="btn btn-sm btn-primary" data-pl="${p.id}" data-name="${esc(p.name)}">加歌单进队列</button></td>
-          </tr>`).join('')}</tbody></table></div>`;
+            <td class="actions">
+              <button class="btn btn-sm" data-view="${p.id}" data-name="${esc(p.name)}">查看</button>
+              <button class="btn btn-sm btn-primary" data-pl="${p.id}" data-name="${esc(p.name)}">加入队列</button>
+            </td>
+          </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       } else {
         box.innerHTML = `<div style="font-size:12px" class="muted">共 ${fmtNum(d.total)} 首</div><div class="table-wrap"><table>
           <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
@@ -138,42 +258,114 @@ TSPages.music = async function () {
             <td>${esc(s.name)} <span class="muted">- ${esc(s.artists)}</span></td>
             <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
             <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
-          </tr>`).join('')}</tbody></table></div>`;
+          </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       }
     } catch (e) {
       box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
     }
   }
 
+  // ---------- 歌单浏览/全量入队 ----------
+  async function openPlaylistModal(plId, plName) {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '歌单：' + plName;
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="list-toolbar">
+        <input type="text" class="input" id="pl-filter" placeholder="筛选本歌单曲目" style="flex:1;min-width:160px">
+        <span class="muted" id="pl-count" style="font-size:12.5px"></span>
+      </div>
+      <div id="pl-list"><div class="empty">加载中…</div></div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    document.getElementById('modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    let all = [];
+    let page = 1;
+    const pageSize = 20;
+    try {
+      const d = await API.musicPlaylistTracksAll(plId);
+      all = d.tracks || [];
+    } catch (e) {
+      body.innerHTML = `<div class="alert error">${esc(e.message)}</div><div class="modal-footer"><button class="btn" onclick="document.getElementById('modal-close').click()">关闭</button></div>`;
+      return;
+    }
+
+    function render() {
+      const kw = (body.querySelector('#pl-filter').value || '').trim().toLowerCase();
+      const list = kw
+        ? all.filter((t) => [t.name, t.artists, t.album].join(' ').toLowerCase().includes(kw))
+        : all;
+      const pages = Math.max(1, Math.ceil(list.length / pageSize));
+      if (page > pages) page = pages;
+      const start = (page - 1) * pageSize;
+      body.querySelector('#pl-count').textContent = `共 ${all.length} 首` + (kw ? `，匹配 ${list.length} 首` : '');
+      const box = body.querySelector('#pl-list');
+      if (!list.length) { box.innerHTML = '<div class="empty">无匹配曲目</div>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
+        <tbody>${list.slice(start, start + pageSize).map(t => `<tr>
+          <td>${esc(t.name)} <span class="muted">- ${esc(t.artists)}</span></td>
+          <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
+          <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration }).replace(/"/g, '&quot;')}'>点歌</button></td>
+        </tr>`).join('')}</tbody></table></div>${pager(page, pages, (p) => { page = p; render(); })}
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="pl-add-all">全部加入队列（${all.length}）</button>
+          <button class="btn" onclick="document.getElementById('modal-close').click()">关闭</button>
+        </div>`;
+      box.querySelector('#pl-add-all').onclick = async () => {
+        try {
+          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration })));
+          TSUtils.toast(`已加入 ${r.count} 首`, 'success');
+          refreshQueue();
+        } catch (err) { TSUtils.toast(err.message, 'error'); }
+      };
+    }
+
+    body.querySelector('#pl-filter').addEventListener('input', () => { page = 1; render(); });
+    render();
+  }
+
   // ---------- 队列 ----------
   async function refreshQueue() {
+    if (token !== TSUtils.navToken()) return;
     try {
-      const d = await API.musicQueue();
+      const d = await API.musicQueue(queuePage, queuePageSize, queueQ);
       const items = d.items || [];
-      $('queue-count').textContent = `（${items.length} 首）`;
+      $('queue-summary').textContent = `（共 ${d.total} 首）`;
       const box = $('queue-list');
-      if (!items.length) { box.innerHTML = '<div class="empty">队列为空</div>'; return; }
+      if (!items.length) {
+        if (d.page > 1) { queuePage = d.page - 1; return refreshQueue(); }
+        box.innerHTML = '<div class="empty">队列为空</div>';
+        return;
+      }
       box.innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>#</th><th>歌曲</th><th>点歌人</th><th class="actions">操作</th></tr></thead>
         <tbody>${items.map((it, i) => `<tr>
           <td>${i + 1}</td>
           <td>${esc(it.title)} <span class="muted">- ${esc(it.artists)}</span></td>
           <td>${esc(it.requestedBy)}</td>
-          <td class="actions"><button class="btn btn-sm btn-danger" data-del="${it.id}">移除</button></td>
-        </tr>`).join('')}</tbody></table></div>`;
+          <td class="actions">
+            <button class="btn btn-sm" data-play="${it.id}">播放</button>
+            <button class="btn btn-sm btn-danger" data-del="${it.id}">移除</button>
+          </td>
+        </tr>`).join('')}</tbody></table></div>${pager(d.page, d.pages, (p) => { queuePage = p; refreshQueue(); })}`;
     } catch (e) { /* 忽略 */ }
   }
 
   // ---------- 事件 ----------
   $('btn-login').onclick = openQrModal;
-  $('btn-search').onclick = doSearch;
-  $('search-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
-  $('search-type').onchange = (e) => { searchType = e.target.value; };
+  $('btn-search').onclick = () => { searchPage = 1; doSearch(); };
+  $('search-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { searchPage = 1; doSearch(); } });
+  $('search-type').onchange = (e) => { searchType = e.target.value; searchPage = 1; };
   $('btn-clear-queue').onclick = async () => {
     if (!confirm('确定清空点歌队列吗？')) return;
     await API.musicClearQueue();
+    queuePage = 1;
     refreshQueue();
   };
+  $('queue-q').addEventListener('input', () => { queuePage = 1; refreshQueue(); });
 
   $('search-results').addEventListener('click', async (e) => {
     const btn = e.target.closest('button');
@@ -182,16 +374,19 @@ TSPages.music = async function () {
       if (btn.dataset.song) {
         const s = JSON.parse(btn.dataset.song);
         await API.musicEnqueue(s);
-        TSUtils.toast('已加入点歌队列 ✓', 'success');
+        TSUtils.toast('已加入点歌队列', 'success');
         refreshQueue();
       } else if (btn.dataset.pl) {
-        const tracks = await API.musicPlaylistTracks(btn.dataset.pl, 30);
+        const tracks = await API.musicPlaylistTracksAll(btn.dataset.pl);
         if (!tracks.tracks || !tracks.tracks.length) { TSUtils.toast('歌单为空', 'error'); return; }
-        for (const t of tracks.tracks) {
-          await API.musicEnqueue({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration });
-        }
-        TSUtils.toast(`已将歌单前 ${tracks.tracks.length} 首加入队列 ✓`, 'success');
+        await API.musicEnqueueMany(tracks.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration })));
+        TSUtils.toast(`已将歌单全部 ${tracks.tracks.length} 首加入队列`, 'success');
         refreshQueue();
+      } else if (btn.dataset.view) {
+        openPlaylistModal(btn.dataset.view, btn.dataset.name);
+      } else if (btn.classList.contains('pager-btn')) {
+        const p = parseInt(btn.dataset.p, 10);
+        doSearch(p);
       }
     } catch (err) {
       TSUtils.toast(err.message, 'error');
@@ -199,13 +394,55 @@ TSPages.music = async function () {
   });
 
   $('queue-list').addEventListener('click', async (e) => {
-    const btn = e.target.closest('button[data-del]');
+    const btn = e.target.closest('button');
     if (!btn) return;
-    await API.musicDequeue(btn.dataset.del);
-    refreshQueue();
+    try {
+      if (btn.dataset.play != null) {
+        await API.musicPlay(parseInt(btn.dataset.play, 10));
+        pollPlayer(true);
+        TSUtils.toast('开始播放', 'success');
+      } else if (btn.dataset.del != null) {
+        await API.musicDequeue(btn.dataset.del);
+      } else if (btn.classList.contains('pager-btn')) {
+        queuePage = parseInt(btn.dataset.p, 10);
+      }
+      refreshQueue();
+    } catch (err) {
+      TSUtils.toast(err.message, 'error');
+      refreshQueue();
+    }
+  });
+
+  // 播放器控制
+  $('btn-prev').onclick = async () => { await API.musicPrev(); pollPlayer(true); };
+  $('btn-next').onclick = async () => { await API.musicNext(); pollPlayer(true); };
+  $('btn-toggle').onclick = async () => { await API.musicToggle(); pollPlayer(true); };
+  $('btn-loop').onclick = async () => {
+    const order = ['all', 'one', 'shuffle', 'off'];
+    const next = order[(order.indexOf(playerState.loopMode) + 1) % order.length];
+    await API.musicLoop(next);
+    pollPlayer(true);
+  };
+  $('player-range').addEventListener('input', () => { seeking = true; });
+  $('player-range').addEventListener('change', async () => {
+    const pos = parseInt($('player-range').value, 10) || 0;
+    seeking = false;
+    try { await API.musicSeek(pos); } catch (e) { /* 忽略 */ }
+    pollPlayer(true);
   });
 
   await refreshLogin();
   await refreshQueue();
-  setInterval(refreshQueue, 5000);
+  await pollPlayer(true);
+  startTick();
+  pollTimer = TSUtils.setInterval(() => { refreshQueue(); pollPlayer(); }, 5000);
+
+  // 页面卸载时清理所有定时器和未关闭的弹窗，避免快速切页写入已销毁 DOM / 卡死
+  TSUtils.registerCleanup(() => {
+    if (playerTick) { clearInterval(playerTick); playerTick = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
+    const ov = document.getElementById('modal-overlay');
+    if (ov) ov.hidden = true;
+  });
 };

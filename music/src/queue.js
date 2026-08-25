@@ -11,6 +11,17 @@ const queueFile = path.join(config.dataDir, 'queue.json');
 let seq = 1;
 let items = []; // { id, title, artists, album, cover, duration, requestedBy, requestedAt }
 
+// 队列变化监听（播放器据此校正"当前播放"指针）
+const listeners = [];
+function onChange(cb) {
+  if (typeof cb === 'function') listeners.push(cb);
+}
+function emitChange(removedId) {
+  for (const cb of listeners) {
+    try { cb(removedId); } catch (e) { /* 忽略 */ }
+  }
+}
+
 function load() {
   try {
     if (!fs.existsSync(queueFile)) return;
@@ -48,16 +59,43 @@ function enqueue(song, requestedBy) {
   return item;
 }
 
+// 批量入队（歌单全量加入），返回新增条目数组
+function enqueueMany(songs, requestedBy) {
+  const added = (Array.isArray(songs) ? songs : [])
+    .filter((s) => s && s.id && s.name)
+    .map((song) => ({
+      id: seq++,
+      title: song.name,
+      artists: song.artists || '',
+      album: song.album || '',
+      cover: song.cover || '',
+      duration: song.duration || 0,
+      requestedBy: requestedBy || 'panel',
+      requestedAt: Date.now(),
+    }));
+  if (added.length) {
+    items.push(...added);
+    save();
+  }
+  return added;
+}
+
 function remove(id) {
   const before = items.length;
   items = items.filter((i) => Number(i.id) !== Number(id));
-  if (items.length !== before) save();
-  return items.length !== before;
+  const removed = items.length !== before;
+  if (removed) {
+    save();
+    emitChange(id);
+  }
+  return removed;
 }
 
 function clear() {
+  const had = items.length > 0;
   items = [];
   save();
+  if (had) emitChange(null);
 }
 
-module.exports = { load, save, all, enqueue, remove, clear };
+module.exports = { load, save, all, enqueue, enqueueMany, remove, clear, onChange };

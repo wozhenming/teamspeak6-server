@@ -11,6 +11,7 @@ window.TSPages = window.TSPages || {};
 
 TSPages.deploy = async function () {
   const content = document.getElementById('page-content');
+  const token = TSUtils.navToken();
   let status = null;
   let taskTimer = null;
 
@@ -317,10 +318,11 @@ TSPages.deploy = async function () {
     }
     const taskId = d.taskId;
     if (taskTimer) clearInterval(taskTimer);
-    taskTimer = setInterval(async () => {
+    taskTimer = TSUtils.setInterval(async () => {
+      if (token !== TSUtils.navToken()) { clearInterval(taskTimer); taskTimer = null; return; }
       try {
         const t = await API.deployTask(taskId);
-        setTerm(consoleEl, t.lines, '运行中…');
+        setTerm(consoleEl, t.lines, '运行中');
         if (t.status !== 'running') {
           clearInterval(taskTimer);
           taskTimer = null;
@@ -338,6 +340,7 @@ TSPages.deploy = async function () {
 
   // ============ ④ 凭证 ============
   async function extractCredentials() {
+    if (token !== TSUtils.navToken()) return;
     const box = $('credentials-box');
     box.innerHTML = '<div class="empty">提取中…</div>';
     try {
@@ -454,6 +457,7 @@ TSPages.deploy = async function () {
 
   // ============ ⑥ 日志 ============
   async function refreshLogs() {
+    if (token !== TSUtils.navToken()) return;
     try {
       const d = await API.deployLogs(300);
       setTerm($('logs-console'), d.log.split('\n'), '容器暂无日志输出');
@@ -468,8 +472,8 @@ TSPages.deploy = async function () {
   $('btn-up').onclick = () => runTask(API.deployUp, '启动服务', (t) => {
     if (t.code === 0) {
       TSUtils.toast('服务启动完成，正在提取初始凭证…', 'success');
-      setTimeout(extractCredentials, 1500);
-      setTimeout(refreshLogs, 2000);
+      TSUtils.setTimeout(extractCredentials, 1500);
+      TSUtils.setTimeout(refreshLogs, 2000);
     } else {
       TSUtils.toast('启动失败，请查看任务输出', 'error');
     }

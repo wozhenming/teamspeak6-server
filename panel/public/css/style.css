@@ -540,3 +540,21 @@ table .num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .chart-box .range-btns { position: absolute; top: 10px; right: 10px; }
 .btn svg { flex: none; }
+
+/* ---------- 点歌播放器 ---------- */
+.music-player .player-main { display: flex; align-items: center; gap: 14px; }
+.player-cover { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: var(--bg); border: 1px solid var(--border); flex: none; }
+.player-info { flex: 1; min-width: 0; }
+.player-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-artists { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.player-progress { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.player-progress input[type=range] { flex: 1; accent-color: var(--accent); min-width: 120px; }
+
+/* ---------- 列表筛选工具条 ---------- */
+.list-toolbar { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+/* ---------- 分页 ---------- */
+.pager { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-top: 10px; font-size: 12.5px; }
+.pager .pager-info { color: var(--text-muted); padding: 0 4px; white-space: nowrap; }
+.pager .btn[disabled] { opacity: .4; cursor: not-allowed; }

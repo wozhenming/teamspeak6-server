@@ -86,9 +86,22 @@ const API = (function () {
     musicQrCheck: (key) => request('GET', `/api/music/qr/check?key=${encodeURIComponent(key)}`),
     musicSearch: (q, type, limit, offset) => request('GET', `/api/music/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit || 20}&offset=${offset || 0}`),
     musicPlaylistTracks: (id, limit) => request('GET', `/api/music/playlist/tracks?id=${id}&limit=${limit || 30}`),
-    musicQueue: () => request('GET', '/api/music/queue'),
+    musicPlaylistTracksAll: (id, cap) => request('GET', `/api/music/playlist/tracks-all?id=${id}&cap=${cap || 2000}`),
+    musicQueue: (page, pageSize, q) => request('GET', `/api/music/queue?page=${page || 1}&pageSize=${pageSize || 10}&q=${encodeURIComponent(q || '')}`),
     musicEnqueue: (song) => request('POST', '/api/music/queue', song),
+    musicEnqueueMany: (songs, requestedBy) => request('POST', '/api/music/queue', { songs, requestedBy }),
     musicDequeue: (id) => request('DELETE', `/api/music/queue/${id}`),
     musicClearQueue: () => request('DELETE', '/api/music/queue'),
+
+    // 播放器
+    musicPlayer: () => request('GET', '/api/music/player'),
+    musicPlay: (id) => request('POST', '/api/music/player/play', { id }),
+    musicToggle: () => request('POST', '/api/music/player/toggle'),
+    musicPause: () => request('POST', '/api/music/player/pause'),
+    musicResume: () => request('POST', '/api/music/player/resume'),
+    musicSeek: (position) => request('POST', '/api/music/player/seek', { position }),
+    musicNext: () => request('POST', '/api/music/player/next'),
+    musicPrev: () => request('POST', '/api/music/player/prev'),
+    musicLoop: (mode) => request('POST', '/api/music/player/loop', { mode }),
   };
 })();

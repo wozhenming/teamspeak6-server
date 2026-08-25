@@ -6,6 +6,7 @@ const path = require('path');
 const { config } = require('./config');
 const enhanced = require('./enhanced');
 const queue = require('./queue');
+const player = require('./player');
 
 const app = express();
 app.disable('x-powered-by');
@@ -110,22 +111,57 @@ app.get('/api/playlist/tracks', async (req, res) => {
   } catch (e) { fail(res, 502, 'PLAYLIST_FAIL', e.message); }
 });
 
+// 歌单全部曲目（用于"全量加入队列"与前端浏览）
+app.get('/api/playlist/tracks-all', async (req, res) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!id) return fail(res, 400, 'BAD_REQUEST', '缺少 id');
+    const cap = Math.min(parseInt(req.query.cap, 10) || 2000, 5000);
+    const tracks = await enhanced.playlistTracksAll(id, cap);
+    ok(res, { tracks });
+  } catch (e) { fail(res, 502, 'PLAYLIST_FAIL', e.message); }
+});
+
 // ---------- 点歌队列 ----------
 app.get('/api/queue', (req, res) => {
-  ok(res, { items: queue.all(), current: null });
+  const all = queue.all();
+  const q = (req.query.q || '').toString().trim().toLowerCase();
+  const filtered = q
+    ? all.filter((it) =>
+        [it.title, it.artists, it.album, it.requestedBy]
+          .join(' ').toLowerCase().includes(q))
+    : all;
+  const total = filtered.length;
+  const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 10, 1), 100);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(parseInt(req.query.page, 10) || 1, 1), pages);
+  const start = (page - 1) * pageSize;
+  ok(res, {
+    items: filtered.slice(start, start + pageSize),
+    total,
+    page,
+    pageSize,
+    pages,
+  });
 });
 
 app.post('/api/queue', (req, res) => {
-  const s = req.body || {};
-  if (!s.id || !s.name) return fail(res, 400, 'BAD_REQUEST', '缺少歌曲信息');
-  const item = queue.enqueue({
-    name: s.name,
-    artists: s.artists || '',
-    album: s.album || '',
-    cover: s.cover || '',
-    duration: s.duration || 0,
-  }, s.requestedBy);
-  ok(res, { item });
+  const body = req.body || {};
+  if (Array.isArray(body.songs) && body.songs.length) {
+    const added = queue.enqueueMany(body.songs, body.requestedBy);
+    ok(res, { items: added, count: added.length });
+  } else {
+    const s = body;
+    if (!s.id || !s.name) return fail(res, 400, 'BAD_REQUEST', '缺少歌曲信息');
+    const item = queue.enqueue({
+      name: s.name,
+      artists: s.artists || '',
+      album: s.album || '',
+      cover: s.cover || '',
+      duration: s.duration || 0,
+    }, s.requestedBy);
+    ok(res, { item });
+  }
 });
 
 app.delete('/api/queue/:id', (req, res) => {
@@ -139,11 +175,54 @@ app.delete('/api/queue', (req, res) => {
   ok(res, { cleared: true });
 });
 
+// ---------- 播放器 ----------
+app.get('/api/player', (req, res) => {
+  ok(res, player.get());
+});
+
+app.post('/api/player/play', (req, res) => {
+  const id = req.body && req.body.id != null ? parseInt(req.body.id, 10) : null;
+  ok(res, player.play(id));
+});
+
+app.post('/api/player/toggle', (req, res) => {
+  ok(res, player.toggle());
+});
+
+app.post('/api/player/pause', (req, res) => {
+  ok(res, player.pause());
+});
+
+app.post('/api/player/resume', (req, res) => {
+  ok(res, player.resume());
+});
+
+app.post('/api/player/seek', (req, res) => {
+  const pos = Number(req.body && req.body.position);
+  if (!Number.isFinite(pos) || pos < 0) return fail(res, 400, 'BAD_REQUEST', 'position 无效');
+  ok(res, player.seek(pos));
+});
+
+app.post('/api/player/next', (req, res) => {
+  ok(res, player.next());
+});
+
+app.post('/api/player/prev', (req, res) => {
+  ok(res, player.prev());
+});
+
+app.post('/api/player/loop', (req, res) => {
+  const mode = (req.body && req.body.mode) || 'all';
+  ok(res, player.setLoop(mode));
+});
+
 // 语音播放输出接口（预留）：后续接入 TS6 语音客户端后在此实现
 // app.post('/api/play/start', ...)
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 queue.load();
+player.load();
+queue.onChange(player.onQueueChanged);
 
 const server = app.listen(config.port, config.host, () => {
   console.log(`[music-bot] 点歌服务已启动 ${config.host}:${config.port}`);
