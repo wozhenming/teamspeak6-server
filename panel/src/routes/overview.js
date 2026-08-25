@@ -76,7 +76,7 @@ function mapChannel(ch) {
 // ---------- 历史指标（采样器数据） ----------
 router.get('/history', async (req, res, next) => {
   try {
-    const minutes = Math.min(Math.max(parseInt(req.query.minutes, 10) || 60, 5), 1440);
+    const minutes = Math.min(Math.max(parseInt(req.query.minutes, 10) || 60, 5), 7 * 24 * 60);
     const metrics = require('../metrics');
     res.json({ ok: true, data: { points: metrics.history(minutes), minutes } });
   } catch (err) { next(err); }

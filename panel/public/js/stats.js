@@ -22,6 +22,8 @@ TSPages.stats = async function () {
     { m: 60, label: '1小时' },
     { m: 360, label: '6小时' },
     { m: 1440, label: '24小时' },
+    { m: 4320, label: '3天' },
+    { m: 10080, label: '7天' },
   ];
   let range = 60;
 

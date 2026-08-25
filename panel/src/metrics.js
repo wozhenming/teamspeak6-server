@@ -14,7 +14,7 @@ const { ts } = require('./webquery');
 const usersDb = require('./users-db');
 
 const SAMPLE_MS = 5000;
-const MAX_POINTS = 24 * 60 * 60 / 5;   // 24 小时 @5s
+const MAX_POINTS = 7 * 24 * 60 * 60 / 5;   // 7 天 @5s
 const MAX_RECENT = 30;                  // 最近加入用户保留条数
 
 const points = []; // { t, clients, up, down }
