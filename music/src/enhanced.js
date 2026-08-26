@@ -145,6 +145,31 @@ async function songUrl(id, level = 'standard') {
   return { url: item.url || '', br: item.br || 0, size: item.size || 0, type: item.type || '' };
 }
 
+// 音乐是否可用：{ success: true, message: 'ok' } 或 { success: false, message: '亲爱的,暂无版权' }
+async function checkMusic(id, br = 999000) {
+  return req('/check/music', { qs: { id, br } });
+}
+
+// 灰色歌曲解灰（UnblockNeteaseMusic）：返回直链或空
+async function songUrlMatch(id, source) {
+  const qs = { id };
+  if (source) qs.source = source;
+  let res;
+  try {
+    res = await req('/song/url/match', { qs });
+  } catch (e) {
+    return { url: '', br: 0, size: 0, type: '' };
+  }
+  const d = (res && res.data) || res || {};
+  const item = Array.isArray(d) ? (d[0] || {}) : d;
+  return {
+    url: item.url || item.sourceUrl || '',
+    br: item.br || item.bitrate || 0,
+    size: item.size || 0,
+    type: item.type || item.encodeType || '',
+  };
+}
+
 async function playlist(id) {
   const res = await req('/playlist/detail', { qs: { id } });
   return res;
@@ -180,6 +205,8 @@ module.exports = {
   search,
   songDetail,
   songUrl,
+  songUrlMatch,
+  checkMusic,
   playlist,
   playlistTracks,
   playlistTracksAll,

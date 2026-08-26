@@ -142,9 +142,29 @@ app.get('/api/stream', async (req, res) => {
           audioUrl = (r && r.url) || '';
         } catch (e) { audioUrl = ''; }
       }
+      // 灰色/无版权歌曲：走 UnblockNeteaseMusic 解灰兜底
+      if (!audioUrl && neteaseId) {
+        try {
+          const m = await Promise.race([
+            enhanced.songUrlMatch(neteaseId),
+            new Promise((_r, rej) => setTimeout(() => rej(new Error('解灰超时')), 10000)),
+          ]);
+          audioUrl = (m && m.url) || '';
+          if (audioUrl) console.log('[stream] 已解灰播放 id=' + neteaseId + ' title=' + (cur.title || '?'));
+        } catch (e) { audioUrl = ''; }
+      }
       if (!audioUrl) {
         failCount++;
-        console.log('[stream] 拿不到歌曲直链(title=' + (cur.title || '?') + ', id=' + neteaseId + ')，切下一首 #' + failCount);
+        // 顺手查一下不可播原因（仅日志用，失败不影响流程）
+        let reason = '';
+        try {
+          const c = await Promise.race([
+            enhanced.checkMusic(neteaseId),
+            new Promise((_r, rej) => setTimeout(() => rej(new Error('超时')), 5000)),
+          ]);
+          if (c && c.success === false) reason = ' (' + (c.message || '暂无版权') + ')';
+        } catch (e) { /* 忽略 */ }
+        console.log('[stream] 拿不到歌曲直链(title=' + (cur.title || '?') + ', id=' + neteaseId + ')' + reason + '，切下一首 #' + failCount);
         player.next();
         await sleep(failCount > 3 ? 5000 : 500);
         continue;
@@ -294,9 +314,20 @@ app.get('/api/song/url', async (req, res) => {
   try {
     const id = parseInt(req.query.id, 10);
     if (!id) return fail(res, 400, 'BAD_REQUEST', '缺少 id');
-    const r = await enhanced.songUrl(id, (req.query.level || 'standard').trim());
+    let r = await enhanced.songUrl(id, (req.query.level || 'standard').trim());
+    // 无直链（灰色/无版权）时走解灰兜底
+    if (!r.url) r = await enhanced.songUrlMatch(id, req.query.source);
     ok(res, r);
   } catch (e) { fail(res, 502, 'SONG_URL_FAIL', e.message); }
+});
+
+// 音乐是否可用：{success:true} 或 {success:false,message:'暂无版权'}
+app.get('/api/check/music', async (req, res) => {
+  try {
+    const id = parseInt(req.query.id, 10);
+    if (!id) return fail(res, 400, 'BAD_REQUEST', '缺少 id');
+    ok(res, await enhanced.checkMusic(id));
+  } catch (e) { fail(res, 502, 'CHECK_MUSIC_FAIL', e.message); }
 });
 
 app.get('/api/playlist/tracks', async (req, res) => {
