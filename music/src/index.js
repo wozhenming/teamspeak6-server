@@ -337,39 +337,28 @@ app.get('/api/ts-bot/channels', async (req, res) => {
 // ---------- 登录状态 ----------
 app.get('/api/status', async (req, res) => {
   try {
-    // 以 /login/status 的真实返回为准（不靠 cookie 文件猜测）
+    // 完全以真实 /login/status 为准；account/profile 任一存在即视为已登录
     const ls = await enhanced.loginStatus();
     const d = (ls && ls.data) || {};
     const account = d.account || null;
     const profile = d.profile || null;
     if (!account && !profile) return ok(res, { loggedIn: false });
 
-    // 并行补齐 VIP / 账号信息（失败不影响主信息）
-    const [vipRes, accRes] = await Promise.allSettled([enhanced.vipInfo(), enhanced.userAccount()]);
-    let vip = null;
-    if (vipRes.status === 'fulfilled') {
-      const v = vipRes.value && vipRes.value.data;
-      if (v) vip = { isVip: !!v.isVip, vipType: v.vipType != null ? v.vipType : null, expireTime: v.expireTime != null ? v.expireTime : null };
-    }
-    let accountInfo = null;
-    if (accRes.status === 'fulfilled') {
-      const a = accRes.value && accRes.value.data;
-      if (a && (a.profile || a.account)) accountInfo = {
-        level: a.level != null ? a.level : null,
-        userId: (a.profile && a.profile.userId) != null ? a.profile.userId : (account && account.id),
-      };
-    }
+    // VIP 以 account.vipType 为准（11=黑胶VIP, 3=黑胶SVIP, 0=非会员），profile.vipType 兜底
+    const vt = (account && account.vipType != null ? account.vipType
+      : (profile && profile.vipType != null ? profile.vipType : 0));
+    const isVip = vt > 0;
+    const vipLabel = vt === 11 ? '黑胶VIP' : vt === 3 ? '黑胶SVIP' : vt === 10 ? 'VIP' : isVip ? 'VIP' : '非会员';
 
-    const realProfile = profile || (accountInfo && accountInfo.profile) || null;
     ok(res, {
       loggedIn: true,
-      profile: realProfile ? {
-        userId: realProfile.userId != null ? realProfile.userId : (account && account.id),
-        nickname: realProfile.nickname || '',
-        avatarUrl: realProfile.avatarUrl || '',
+      profile: profile ? {
+        userId: profile.userId != null ? profile.userId : (account && account.id),
+        nickname: profile.nickname || '',
+        avatarUrl: profile.avatarUrl || '',
       } : null,
-      account: account ? { userId: account.id, level: accountInfo && accountInfo.level, bindEmail: !!account.bindEmail, bindMobile: !!account.bindMobile } : null,
-      vip,
+      account: account ? { userId: account.id, vipType: vt, anonymous: !!account.anonimousUser } : null,
+      vip: { isVip, vipType: vt, label: vipLabel, expireTime: null },
     });
   } catch (e) {
     ok(res, { loggedIn: false, error: e.message });

@@ -256,17 +256,19 @@ TSPages.music = async function () {
       el.style.color = 'var(--text-muted)';
       const p = d.profile || {};
       $('login-name').textContent = p.nickname || '已登录网易云';
-      $('login-avatar').src = p.avatarUrl ? API.musicImg(p.avatarUrl.replace(/^https?:/, ''), '68y68') : '';
+      if (p.avatarUrl) {
+        $('login-avatar').src = p.avatarUrl;
+        $('login-avatar').style.display = '';
+      } else {
+        $('login-avatar').removeAttribute('src');
+        $('login-avatar').style.display = 'none';
+      }
       let meta = '';
       if (d.vip) {
-        if (d.vip.isVip) {
-          const exp = d.vip.expireTime ? new Date(d.vip.expireTime).toISOString().slice(0, 10) : '';
-          meta = `<span class="fee-badge fee-vip">VIP${d.vip.vipType === 11 ? '·年费' : ''}${exp ? ' · ' + exp + ' 到期' : ''}</span>`;
-        } else {
-          meta = '<span class="fee-badge fee-none">非VIP</span>';
-        }
+        meta = d.vip.isVip
+          ? `<span class="fee-badge fee-vip">${esc(d.vip.label || 'VIP')}</span>`
+          : '<span class="fee-badge fee-none">非VIP</span>';
       }
-      if (d.account && d.account.level) meta += '<span style="margin-left:6px">Lv.' + d.account.level + '</span>';
       $('login-meta').innerHTML = meta || '';
       $('login-user').hidden = false;
     } catch (e) { /* 服务不可用 */ }
