@@ -124,6 +124,7 @@ const pending = []; // { rows, resolve, reject, timer }
 function dispatchLine(line) {
   if (line.startsWith('notifytextmessage')) {
     const p = parseParams(line);
+    console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' msg=' + String(p.msg || '').slice(0, 80));
     const uid = p.invokeruid || '';
     if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?').catch(() => {});
     return;
@@ -234,18 +235,25 @@ async function bootstrap() {
     const myClid = who.client_id != null ? who.client_id : who.clid;
     const myCid = who.client_channel_id != null ? who.client_channel_id : who.cid;
     const list = await cmd('clientlist -uid');
-    const items = Array.isArray(list) ? list : [];
+    // clientlist 单行时可能是对象，统一成数组
+    const rawItems = Array.isArray(list) ? list : [list];
+    const items = rawItems.filter(Boolean);
     const bot = items.find((x) => x.client_nickname === '点歌机器人')
       || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
     let botCid = bot ? bot.cid : null;
     if (!botCid) {
-      const firstVoice = items.find((x) => String(x.client_type) !== '1');
-      if (firstVoice) botCid = firstVoice.cid;
+      const voice = items.find((x) => String(x.client_type) !== '1');
+      if (voice && String(voice.cid) !== String(myCid)) botCid = voice.cid;
     }
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
     }
-    await cmd('servernotifyregister event=textchannel');
+    // 订阅频道聊天 + 私聊 + 服务器聊天，尽量覆盖用户的不同发送方式
+    for (const ev of ['textchannel', 'textprivate', 'textserver']) {
+      try { await cmd('servernotifyregister event=' + ev); }
+      catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
+    }
+    if (!bot) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     bootstrapped = true;
     state = 'listening';
     console.log('[tschat] 已加入频道并监听 !点歌 命令 (clid=' + myClid + ', cid=' + (botCid || myCid || '?') + ', 昵称=' + nick + ')');

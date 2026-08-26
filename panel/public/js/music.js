@@ -88,8 +88,8 @@ TSPages.music = async function () {
           <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
-            <input type="checkbox" id="ts-chat-on" style="flex:none;margin:0">
+          <label class="ts-toggle" style="font-size:12.5px">
+            <input type="checkbox" id="ts-chat-on">
             <span>在频道内启用聊天点歌</span>
           </label>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">

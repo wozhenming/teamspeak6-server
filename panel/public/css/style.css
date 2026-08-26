@@ -321,6 +321,16 @@ select.select option { background: var(--bg-card); }
 
 label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
 label input, label .input { width: 100%; margin-top: 5px; }
+/* 行内开关（复选框+文字横排）：覆盖上面的 label 默认块级与 input 全宽 */
+label.ts-toggle {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  margin-bottom: 0;
+  text-align: left;
+}
+label.ts-toggle input[type="checkbox"] { width: auto; margin: 0; flex: none; }
 
 .muted { color: var(--text-muted); }
 .mono { font-family: Consolas, "Courier New", monospace; font-size: 12.5px; }
