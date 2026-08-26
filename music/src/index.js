@@ -260,6 +260,7 @@ function startEncoder() {
   let lastTick = Date.now();
   let lastAlignAt = 0;
   let failCount = 0;
+  let lastRev = -1;
 
   (async () => {
     let mode = 'silence';
@@ -397,8 +398,13 @@ function startEncoder() {
         }
       }
 
+      // seek / 漂移判定：
+      //  - rev 变化 => 用户主动操作(seek/恢复)，按 UI 目标 Range 重取
+      //  - rev 未变但偏差大 => 上游卡顿导致的时钟漂移，以实际声音为准回拨时钟（不跳源）
       const uiTarget = Math.floor(player.get().position);
-      if (Math.abs(uiTarget - songPos) > 2) {
+      const revChanged = st.rev !== lastRev;
+      lastRev = st.rev;
+      if (revChanged && Math.abs(uiTarget - songPos) > 1.5) {
         stopSource(src); src = null; accBytes = 0;
         songPos = uiTarget;
         if (SILENCE_BUF) {
@@ -412,6 +418,8 @@ function startEncoder() {
           }
           silencePosLocal = p3 % SILENCE_BUF.length;
         }
+      } else if (!revChanged && Math.abs(uiTarget - songPos) > 8) {
+        try { player.align(songPos); } catch (e) {}
       }
 
       accBytes += dt * srcBps;
