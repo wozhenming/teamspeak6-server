@@ -197,7 +197,7 @@ function toggle() {
   return state.playing ? pause() : resume();
 }
 
-// 跳转到指定秒数
+// 跳转到指定秒数（会改变实际出声位置，rev 自增）
 function seek(sec) {
   if (!state.currentId) return get();
   const dur = durationOf(currentItem());
@@ -208,6 +208,20 @@ function seek(sec) {
   state.basePosition = pos;
   state.updatedAt = Date.now();
   rev++;
+  save();
+  return get();
+}
+
+// 进度校准：把时钟对齐到音频流的真实位置（不改变出声，rev 不自增）
+// 由电台流泵定期调用，保证 UI 进度条与实际听到的严格一致
+function align(sec) {
+  if (!state.currentId) return get();
+  let pos = Number(sec);
+  if (!Number.isFinite(pos) || pos < 0) pos = 0;
+  const dur = durationOf(currentItem());
+  if (dur > 0 && pos > dur) pos = dur;
+  state.basePosition = pos;
+  state.updatedAt = Date.now();
   save();
   return get();
 }
@@ -249,6 +263,7 @@ module.exports = {
   resume,
   toggle,
   seek,
+  align,
   next,
   prev,
   setLoop,

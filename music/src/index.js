@@ -80,18 +80,30 @@ function generateSilence() {
   });
 }
 
-// 探测音频真实可播时长（试听片段/版权截断的文件本身较短，元数据时长不准）
-function probeDuration(input) {
+// 探测音频真实时长与码率（试听片段/版权截断的文件本身较短，元数据时长不准）
+function probeMedia(input) {
   const { spawn } = require('child_process');
   return new Promise((resolve) => {
     const p = spawn('ffprobe', [
-      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', input,
+      '-v', 'error', '-show_entries', 'format=duration,bit_rate', '-of', 'default=nw=1', input,
     ], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch (e) {} }, 10000);
     p.stdout.on('data', (c) => { out += c.toString(); });
-    p.on('error', () => { clearTimeout(t); resolve(0); });
-    p.on('close', () => { clearTimeout(t); const v = parseFloat(out.trim()); resolve(Number.isFinite(v) && v > 0 ? v : 0); });
+    p.on('error', () => { clearTimeout(t); resolve({ dur: 0, br: 0 }); });
+    p.on('close', () => {
+      clearTimeout(t);
+      let dur = 0, br = 0;
+      for (const line of out.split('\n')) {
+        const m = line.match(/^(duration|bit_rate)=(.*)$/);
+        if (!m) continue;
+        const v = parseFloat(m[2]);
+        if (!Number.isFinite(v)) continue;
+        if (m[1] === 'duration' && v > 0) dur = v;
+        if (m[1] === 'bit_rate' && v > 0) br = v;
+      }
+      resolve({ dur: Math.round(dur), br: Math.round(br) });
+    });
   });
 }
 
@@ -106,78 +118,146 @@ app.get('/api/stream', async (req, res) => {
   res.set('Transfer-Encoding', 'chunked');
   res.flushHeaders && res.flushHeaders();
 
+  // ================= 常驻编码器架构 =================
+  // 整个连接只启动一个 ffmpeg（stdin 喂 MP3 帧 -> 恒定 128k 输出）。
+  // 切歌 / seek / 暂停 / 恢复只是切换“喂进来的数据源”，进程永不重启：
+  //   - 帧流连续 => 不再有杀进程导致的半截帧“电音”
+  //   - 进度 = 已喂字节数 / 码率 => 与实际听到的严格一致，定期 align 回写播放器时钟
   const { spawn } = require('child_process');
   let closed = false;
   req.on('close', () => { closed = true; });
 
-  const pipeFf = (ff, isDone) => new Promise((resolve) => {
-    let finished = false;
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      clearInterval(iv);
-      try { ff.kill('SIGKILL'); } catch (e) {}
-      resolve();
-    };
-    // 状态变化（seek/暂停/切歌）时必须真正终止当前转码进程，否则 pump 会卡死
-    const iv = setInterval(() => { if (isDone()) finish(); }, 120);
-    ff.stdout.on('data', (chunk) => {
-      if (isDone()) return finish();
-      if (!res.write(chunk)) {
-        ff.stdout.pause();
-        res.once('drain', () => { if (!isDone()) ff.stdout.resume(); });
-      }
-    });
-    ff.on('error', () => finish());
-    ff.on('close', () => finish());
-    req.on('close', () => finish());
+  const ff = spawn('ffmpeg', [
+    '-hide_banner', '-f', 'mp3', '-i', 'pipe:0',
+    '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
+    '-f', 'mp3', '-',
+  ], { stdio: ['pipe', 'pipe', 'ignore'] });
+  ff.on('error', () => {});
+  ff.on('close', () => {
+    closed = true;
+    try { if (!res.writableEnded) res.end(); } catch (e) {}
   });
 
-  // 过渡垫片：切歌/暂停/恢复边界先补一小段干净静音帧，
-  // 掩盖被 SIGKILL 的 ffmpeg 留下的半截 MP3 帧（否则解码器会出“电音”杂音）
-  const padSilence = async (ms) => {
-    if (!SILENCE_BUF) return;
-    const bytes = Math.max(64, Math.ceil(ms / 1000 * 4000)); // 32kbps ≈ 4KB/s
-    let written = 0, pos = 0;
-    while (written < bytes && !closed && !res.writableEnded) {
-      const n = Math.min(1024, bytes - written, SILENCE_BUF.length - pos);
-      const okWrite = res.write(SILENCE_BUF.subarray(pos, pos + n));
-      pos = (pos + n) % SILENCE_BUF.length;
-      written += n;
-      if (!okWrite) await new Promise((r) => res.once('drain', r));
+  let outPaused = false;
+  ff.stdout.on('data', (chunk) => {
+    if (closed) return;
+    outPaused = !res.write(chunk);
+  });
+  res.once('drain', () => { outPaused = false; });
+
+
+  const SILENCE_BPS = 4000;    // 静音缓冲按 32kbps 折算
+  const FALLBACK_BPS = 16000;  // 未探测到码率时按 128kbps 估算
+
+  // ---------- 上游音频源（支持 Range 续取、内部缓冲） ----------
+  function openSource(url, offsetBytes) {
+    const ctrl = new AbortController();
+    const headers = offsetBytes > 4096 ? { Range: 'bytes=' + offsetBytes + '-' } : {};
+    const p = fetch(url, { signal: ctrl.signal, headers });
+    const st = {
+      ctrl, queue: [], qsize: 0, ended: false, failed: false,
+      ns: null, waiters: [],
+      notify() { const ws = this.waiters.splice(0); for (const w of ws) w(); },
+    };
+    p.then((up) => {
+      if (!up.ok || !up.body) { st.failed = true; st.ended = true; st.notify(); return; }
+      const ns = Readable.fromWeb(up.body);
+      st.ns = ns;
+      ns.on('data', (c) => {
+        st.queue.push(c); st.qsize += c.length;
+        if (st.qsize > 512 * 1024 && !ns.isPaused()) ns.pause();
+        st.notify();
+      });
+      ns.on('end', () => { st.ended = true; st.notify(); });
+      ns.on('error', () => { st.failed = true; st.ended = true; st.notify(); });
+    }).catch(() => { st.failed = true; st.ended = true; st.notify(); });
+    return st;
+  }
+
+  function pumpSource(st) {
+    if (st && st.ns && st.isPaused !== false && st.qsize < 256 * 1024 && st.ns.isPaused()) st.ns.resume();
+  }
+
+  async function readSource(st) {
+    if (!st) return null;
+    while (true) {
+      if (st.queue.length) {
+        const c = st.queue.shift();
+        st.qsize -= c.length;
+        pumpSource(st);
+        return c;
+      }
+      if (st.ended) return null;
+      await Promise.race([new Promise((r) => st.waiters.push(r)), sleep(60)]);
     }
-  };
+  }
 
-  // 空闲/暂停：直接回放预生成静音缓冲（纯内存，无进程开销，暂停/恢复零延迟）
-  const streamSilence = () => new Promise((resolve) => {
-    let pos = 0;
-    const tick = () => {
-      const st = player.get();
-      if (closed || res.writableEnded || (st.current && st.playing)) return resolve();
-      if (!SILENCE_BUF) { setTimeout(tick, 200); return; }
+  function stopSource(st) { try { if (st && st.ctrl) st.ctrl.abort(); } catch (e) {} }
+
+  async function writeStdin(buf) {
+    if (closed || ff.stdin.destroyed) return false;
+    ff.stdin.write(buf);
+    return true;
+  }
+
+  async function feedSilence(ms) {
+    if (!SILENCE_BUF || closed) return;
+    let need = Math.ceil(SILENCE_BPS * ms / 1000);
+    let pos = silencePos;
+    while (need > 0 && !closed && !ff.stdin.destroyed) {
       if (pos >= SILENCE_BUF.length) pos = 0;
-      const end = Math.min(pos + 1024, SILENCE_BUF.length); // ~250ms @32kbps
-      const okWrite = res.write(SILENCE_BUF.subarray(pos, end));
-      pos = end;
-      if (okWrite) setTimeout(tick, 230);
-      else res.once('drain', () => setTimeout(tick, 50));
-    };
-    tick();
-  });
+      const n = Math.min(1024, SILENCE_BUF.length - pos, need);
+      await writeStdin(SILENCE_BUF.subarray(pos, pos + n));
+      pos += n; need -= n;
+    }
+    silencePos = pos % SILENCE_BUF.length;
+  }
 
-  const pump = async () => {
-    let failCount = 0;
+  // ---------- 导播主循环 ----------
+  let srcBps = FALLBACK_BPS;          // 当前歌曲“字节/秒”
+  let songPos = 0;                    // 当前歌真实已播秒数（由喂入字节换算）
+  let curKey = null;
+  let src = null;
+  let lastTick = Date.now();
+  let lastAlignAt = 0;
+  let silencePos = 0;
+  let failCount = 0;
+
+  (async () => {
+    let mode = 'silence';
+    let accBytes = 0;
+
     while (!closed) {
-      let st = player.get();
-      if (!st.current) {
-        if (queue.all().length) { player.play(); st = player.get(); }
-        else { failCount = 0; await streamSilence(); continue; }
-      }
-      if (!st.playing) { failCount = 0; await streamSilence(); continue; }
+      const now = Date.now();
+      const dt = Math.min(0.5, (now - lastTick) / 1000);
+      lastTick = now;
+      if (outPaused) { await sleep(40); continue; }
 
+      const st = player.get();
+      const wantSong = !!(st.current && st.playing);
+
+      // ---- 空闲 / 暂停：静音 ----
+      if (!wantSong) {
+        if (mode !== 'silence') { mode = 'silence'; stopSource(src); src = null; accBytes = 0; }
+        await feedSilence(Math.floor(dt * 1000));
+        await sleep(30);
+        continue;
+      }
+
+      // ---- 有歌且在播 ----
       const cur = st.current;
-      const curKey = cur.id;
-      // 取网易云真实歌曲 ID：新条目存了 songId；旧持久化条目按“标题+歌手”搜索自愈
+      if (cur.id !== curKey || mode === 'silence') {
+        // 新歌 / 从暂停恢复：重置位置与源
+        curKey = cur.id;
+        songPos = Math.max(0, Math.floor(st.position) || 0);
+        stopSource(src); src = null;
+        mode = 'song';
+        accBytes = 0;
+        await feedSilence(120); // 内容切换边界垫片
+        if (closed) break;
+      }
+
+      // 解析网易云 ID 与直链（缓存 / 解灰兜底）
       let neteaseId = cur.songId || songIdCache[curKey] || null;
       if (!neteaseId) {
         try {
@@ -185,25 +265,25 @@ app.get('/api/stream', async (req, res) => {
           const r = kw ? await enhanced.search(kw, 'song', 1, 0) : null;
           const first = r && r.songs && r.songs[0];
           if (first) { songIdCache[curKey] = first.id; neteaseId = first.id; }
-        } catch (e) { /* 搜索失败走跳过 */ }
+        } catch (e) {}
       }
-
-      let audioUrl = '';
-      if (neteaseId) {
-        const cached = urlCache.get(neteaseId);
-        if (cached && cached.url && Date.now() - cached.at < URL_TTL) {
-          audioUrl = cached.url;
-        } else {
-          try {
-            const r = await Promise.race([
-              enhanced.songUrl(neteaseId),
-              new Promise((_r, rej) => setTimeout(() => rej(new Error('songUrl 超时')), 8000)),
-            ]);
-            audioUrl = (r && r.url) || '';
-          } catch (e) { audioUrl = ''; }
-        }
+      let audioUrl = '', audioType = '';
+      const cachedEntry = neteaseId ? urlCache.get(neteaseId) : null;
+      if (cachedEntry && cachedEntry.url && Date.now() - cachedEntry.at < URL_TTL) {
+        audioUrl = cachedEntry.url;
+        audioType = cachedEntry.type || '';
+        if (cachedEntry.br) srcBps = Math.min(60000, Math.max(8000, Math.round(cachedEntry.br / 8)));
       }
-      // 灰色/无版权歌曲：走 UnblockNeteaseMusic 解灰兜底
+      if (!audioUrl && neteaseId) {
+        try {
+          const r = await Promise.race([
+            enhanced.songUrl(neteaseId),
+            new Promise((_r, rej) => setTimeout(() => rej(new Error('songUrl 超时')), 8000)),
+          ]);
+          audioUrl = (r && r.url) || '';
+          audioType = (r && r.type) || '';
+        } catch (e) { audioUrl = ''; }
+      }
       if (!audioUrl && neteaseId) {
         try {
           const m = await Promise.race([
@@ -214,10 +294,10 @@ app.get('/api/stream', async (req, res) => {
           if (audioUrl) console.log('[stream] 已解灰播放 id=' + neteaseId + ' title=' + (cur.title || '?'));
         } catch (e) { audioUrl = ''; }
       }
-      if (audioUrl) urlCache.set(neteaseId, { url: audioUrl, at: Date.now() });
+      if (neteaseId && audioUrl) urlCache.set(neteaseId, Object.assign({}, urlCache.get(neteaseId), { url: audioUrl, at: Date.now(), type: audioType }));
+
       if (!audioUrl) {
         failCount++;
-        // 顺手查一下不可播原因（仅日志用，失败不影响流程）
         let reason = '';
         try {
           const c = await Promise.race([
@@ -225,7 +305,7 @@ app.get('/api/stream', async (req, res) => {
             new Promise((_r, rej) => setTimeout(() => rej(new Error('超时')), 5000)),
           ]);
           if (c && c.success === false) reason = ' (' + (c.message || '暂无版权') + ')';
-        } catch (e) { /* 忽略 */ }
+        } catch (e) {}
         console.log('[stream] 拿不到歌曲直链(title=' + (cur.title || '?') + ', id=' + neteaseId + ')' + reason + '，切下一首 #' + failCount);
         player.next();
         await sleep(failCount > 3 ? 5000 : 500);
@@ -233,62 +313,88 @@ app.get('/api/stream', async (req, res) => {
       }
       failCount = 0;
 
-      // 经 neteasemusic 出口代理抓取音频（music-bot 可能无外网）
-      const input = config.imgProxy
-        ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
-        : audioUrl;
-
-      // 从当前进度起播（seek/恢复播放时 >0），-ss 走输入端快速跳转
-      const startPos = Math.max(0, Math.floor(player.get().position) || 0);
-      // 先垫一小段干净静音，掩盖上一段被终止的半截帧
-      await padSilence(startPos > 0 ? 250 : 150);
-      if (closed) break;
-      const ffArgs = ['-re', '-protocol_whitelist', 'file,http,https,tcp,pipe'];
-      if (startPos > 0) ffArgs.push('-ss', String(startPos));
-      ffArgs.push('-i', input, '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', '-f', 'mp3', '-');
-      const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-      const revAtStart = player.get().rev;
-      let errTail = '';
-      ff.stderr.on('data', (d) => { if (errTail.length < 2000) errTail += d.toString(); });
-      ff.on('close', (code) => {
-        const nowCur = player.get().current;
-        const interrupted = closed || !nowCur || nowCur.id !== curKey || player.get().rev !== revAtStart;
-        if (!interrupted && code !== 0) console.log('[stream] ffmpeg 提前退出 code=' + code + ' | ' + errTail.slice(-300));
-      });
-
-      // 后台探测真实可播时长（试听/版权截断文件比元数据短），修正队列时长与自动切歌
-      if (!cur.realDurProbed && neteaseId) {
-        cur.realDurProbed = true;
-        probeDuration(input).then((realSec) => {
-          if (realSec > 0) {
-            const real = Math.round(realSec);
-            const meta = cur.duration || 0;
-            if (!meta || Math.abs(meta - real) >= 3) {
-              console.log('[stream] 实际可播 ' + real + 's（元数据 ' + meta + 's）id=' + neteaseId);
-              cur.duration = real;
-              try { queue.save(); } catch (e) {}
-            }
-          }
-        }).catch(() => {});
-      }
-
-      await pipeFf(ff, () => {
-        const s = player.get();
-        return closed || !s.current || s.current.id !== curKey || s.rev !== revAtStart;
-      });
-
-      if (closed) break;
-      const sNow = player.get();
-      if (sNow.rev === revAtStart && sNow.current && sNow.current.id === curKey && sNow.playing) {
-        // 期间无任何手动操作且曲子真的放完 -> 自然前进
+      // 非 MP3 容器跳过（stdin 是 mp3 解复用，AAC/M4A 会成噪声）
+      if (audioType && !/mp3/i.test(audioType)) {
+        console.log('[stream] 非 MP3 音源跳过 type=' + audioType + ' id=' + neteaseId);
         player.next();
+        await sleep(300);
+        continue;
       }
-      // 其余情况（seek/暂停/切歌等）回到循环顶部按最新状态重新拉流
-      await sleep(150);
+
+      // 确保上游源存在
+      if (!src && audioUrl) {
+        const input = config.imgProxy
+          ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
+          : audioUrl;
+        const offset = Math.floor(songPos * srcBps);
+        src = openSource(input, offset);
+
+        if (!cur.realDurProbed && neteaseId) {
+          cur.realDurProbed = true;
+          probeMedia(input).then(({ dur, br }) => {
+            if (br > 0) srcBps = Math.min(60000, Math.max(8000, Math.round(br / 8)));
+            if (dur > 0) {
+              const meta = cur.duration || 0;
+              if (!meta || Math.abs(meta - dur) >= 3) {
+                console.log('[stream] 实际可播 ' + dur + 's（元数据 ' + meta + 's）id=' + neteaseId);
+                cur.duration = dur;
+                try { queue.save(); } catch (e) {}
+              }
+            }
+            const ce = neteaseId ? urlCache.get(neteaseId) : null;
+            if (ce) { ce.dur = dur; ce.br = br; }
+          }).catch(() => {});
+        }
+      }
+
+      // seek 检测：UI 目标与实际喂入位置差 >2s 时，Range 重取实现无缝跳转（进程不重启）
+      const uiTarget = Math.floor(player.get().position);
+      if (Math.abs(uiTarget - songPos) > 2) {
+        stopSource(src); src = null; accBytes = 0;
+        songPos = uiTarget;
+        await feedSilence(120);
+      }
+
+      // 按实时速率预算喂入
+      accBytes += dt * srcBps;
+      accBytes = Math.min(accBytes, srcBps * 2);
+      let fedAny = false, upstreamDone = false;
+      while (accBytes >= 1024 && !closed) {
+        if (!src) break;
+        const chunk = await readSource(src);
+        if (chunk === null) {
+          if (src.ended) { upstreamDone = true; break; }
+          break; // 数据未到，下轮再试
+        }
+        songPos += chunk.length / srcBps;
+        await writeStdin(chunk);
+        accBytes -= chunk.length;
+        fedAny = true;
+        if (outPaused) break;
+      }
+
+      if (upstreamDone) {
+        stopSource(src); src = null;
+        await feedSilence(250); // 歌间短静音
+        const sNow = player.get();
+        if (sNow.current && sNow.current.id === curKey && sNow.playing) player.next();
+      }
+
+      // 定期把真实进度回写播放器时钟（UI 进度条与声音严格同步）
+      if (now - lastAlignAt > 2000 && curKey != null) {
+        lastAlignAt = now;
+        try { player.align(songPos); } catch (e) {}
+      }
+
+      await sleep(30);
     }
-    if (!res.writableEnded) res.end();
-  };
-  pump();
+    try { ff.stdin.end(); } catch (e) {}
+    setTimeout(() => { try { ff.kill('SIGKILL'); } catch (e) {} }, 300);
+  })().catch((e) => {
+    console.log('[stream] 泵异常:', e.message);
+    try { ff.stdin.end(); } catch (e2) {}
+    try { ff.kill('SIGKILL'); } catch (e2) {}
+  });
 });
 
 // ---------- ts6-manager 对接（点歌机器人进入 TeamSpeak） ----------
