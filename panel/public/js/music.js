@@ -219,8 +219,20 @@ TSPages.music = async function () {
     try {
       const d = await API.musicStatus();
       const el = $('login-state');
-      el.textContent = d.loggedIn ? '已登录网易云' : '未登录（登录后可播放受版权歌曲）';
-      el.style.color = d.loggedIn ? 'var(--green)' : 'var(--text-muted)';
+      if (!d.loggedIn) {
+        el.textContent = '未登录（登录后可播放受版权歌曲）';
+        el.style.color = 'var(--text-muted)';
+        return;
+      }
+      let html = d.profile && d.profile.nickname ? ('已登录：' + esc(d.profile.nickname)) : '已登录网易云';
+      if (d.vip && d.vip.isVip) {
+        const exp = d.vip.expireTime ? new Date(d.vip.expireTime).toISOString().slice(0, 10) : '';
+        html += ` <span class="fee-badge fee-vip">VIP${d.vip.vipType === 11 ? '·年费' : ''}${exp ? ' · ' + exp + ' 到期' : ''}</span>`;
+      } else {
+        html += ' <span class="fee-badge fee-none">非VIP</span>';
+      }
+      el.innerHTML = html;
+      el.style.color = 'var(--green)';
     } catch (e) { /* 服务不可用 */ }
   }
 

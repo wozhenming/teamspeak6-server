@@ -124,6 +124,12 @@ async function loginStatus() {
   return res;
 }
 
+// 当前登录账号的 VIP 信息（登录态经 cookie 生效）
+// 典型返回 data: { isVip: bool, vipType: 0无/10普通/11年费..., expireTime: 毫秒时间戳 }
+async function vipInfo() {
+  return req('/vip/info');
+}
+
 // ---------- 搜索 ----------
 const SEARCH_TYPES = { song: 1, playlist: 1000, album: 10, artist: 100, singer: 100 };
 async function search(keywords, type = 'song', limit = 20, offset = 0) {
@@ -203,6 +209,7 @@ module.exports = {
   qrCreate,
   qrCheck,
   loginStatus,
+  vipInfo,
   search,
   songDetail,
   songUrl,

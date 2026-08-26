@@ -327,10 +327,44 @@ app.get('/api/status', async (req, res) => {
     // 有 MUSIC_U cookie 视为已登录（可进一步校验）
     const loggedIn = fs.existsSync(path.join(config.dataDir, 'cookie.txt')) &&
       /MUSIC_U=/.test(fs.readFileSync(path.join(config.dataDir, 'cookie.txt'), 'utf8') || '');
-    ok(res, { loggedIn });
+    if (!loggedIn) return ok(res, { loggedIn: false });
+
+    // 并行取用户资料与 VIP 信息（单项失败不影响整体）
+    const [profileRes, vipRes] = await Promise.allSettled([
+      enhanced.loginStatus(),
+      enhanced.vipInfo(),
+    ]);
+
+    let profile = null;
+    if (profileRes.status === 'fulfilled') {
+      const d = profileRes.value && profileRes.value.data;
+      const p = d && d.profile;
+      profile = p ? { userId: p.userId, nickname: p.nickname || '', avatarUrl: p.avatarUrl || '' } : null;
+    }
+    let vip = null;
+    if (vipRes.status === 'fulfilled') {
+      const d = vipRes.value && vipRes.value.data;
+      if (d) {
+        vip = {
+          isVip: !!d.isVip,
+          vipType: d.vipType != null ? d.vipType : null,       // 0无 / 10普通 / 11年费（常见值）
+          expireTime: d.expireTime != null ? d.expireTime : null, // 毫秒时间戳
+        };
+      }
+    }
+    ok(res, { loggedIn: true, profile, vip });
   } catch (e) {
     ok(res, { loggedIn: false });
   }
+});
+
+// 独立的 VIP 信息接口
+app.get('/api/vip/info', async (req, res) => {
+  try {
+    const r = await enhanced.vipInfo();
+    const d = (r && r.data) || {};
+    ok(res, { isVip: !!d.isVip, vipType: d.vipType != null ? d.vipType : null, expireTime: d.expireTime != null ? d.expireTime : null });
+  } catch (e) { fail(res, 502, 'VIP_INFO_FAIL', e.message); }
 });
 
 // ---------- 扫码登录 ----------
