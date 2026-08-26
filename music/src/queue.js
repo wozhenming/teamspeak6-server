@@ -46,6 +46,7 @@ function all() {
 function enqueue(song, requestedBy) {
   const item = {
     id: seq++,
+    songId: song.songId || song.id || null, // 网易云真实歌曲 ID（取直链必需，勿丢！）
     title: song.name,
     artists: song.artists || '',
     album: song.album || '',
@@ -65,6 +66,7 @@ function enqueueMany(songs, requestedBy) {
     .filter((s) => s && s.id && s.name)
     .map((song) => ({
       id: seq++,
+      songId: song.songId || song.id || null, // 网易云真实歌曲 ID
       title: song.name,
       artists: song.artists || '',
       album: song.album || '',

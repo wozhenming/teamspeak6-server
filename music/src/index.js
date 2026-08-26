@@ -61,6 +61,7 @@ app.get('/api/img', async (req, res) => {
 // 把当前点歌队列当作“网络电台”持续输出：逐首解析网易云直链并管道输出，
 // 一曲结束后自动下一首；用户在面板切歌/暂停时本流自动跟随。
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const songIdCache = {}; // 队列条目内部 id -> 网易云歌曲 id（旧数据自愈用）
 
 app.get('/api/stream', async (req, res) => {
   // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
@@ -109,18 +110,46 @@ app.get('/api/stream', async (req, res) => {
   });
 
   const pump = async () => {
+    let failCount = 0;
     while (!closed) {
       let st = player.get();
       if (!st.current) {
         if (queue.all().length) { player.play(); st = player.get(); }
-        else { await streamSilence(); continue; }
+        else { failCount = 0; await streamSilence(); continue; }
       }
-      if (!st.playing) { await streamSilence(); continue; }
+      if (!st.playing) { failCount = 0; await streamSilence(); continue; }
 
-      const curId = st.current.id;
+      const cur = st.current;
+      const curKey = cur.id;
+      // 取网易云真实歌曲 ID：新条目存了 songId；旧持久化条目按“标题+歌手”搜索自愈
+      let neteaseId = cur.songId || songIdCache[curKey] || null;
+      if (!neteaseId) {
+        try {
+          const kw = [cur.title, cur.artists].filter(Boolean).join(' ');
+          const r = kw ? await enhanced.search(kw, 'song', 1, 0) : null;
+          const first = r && r.songs && r.songs[0];
+          if (first) { songIdCache[curKey] = first.id; neteaseId = first.id; }
+        } catch (e) { /* 搜索失败走跳过 */ }
+      }
+
       let audioUrl = '';
-      try { audioUrl = (await enhanced.songUrl(curId)).url || ''; } catch (e) { audioUrl = ''; }
-      if (!audioUrl) { player.next(); await sleep(300); continue; }
+      if (neteaseId) {
+        try {
+          const r = await Promise.race([
+            enhanced.songUrl(neteaseId),
+            new Promise((_r, rej) => setTimeout(() => rej(new Error('songUrl 超时')), 8000)),
+          ]);
+          audioUrl = (r && r.url) || '';
+        } catch (e) { audioUrl = ''; }
+      }
+      if (!audioUrl) {
+        failCount++;
+        console.log('[stream] 拿不到歌曲直链(title=' + (cur.title || '?') + ', id=' + neteaseId + ')，切下一首 #' + failCount);
+        player.next();
+        await sleep(failCount > 3 ? 5000 : 500);
+        continue;
+      }
+      failCount = 0;
 
       // 经 neteasemusic 出口代理抓取音频（music-bot 可能无外网）
       const input = config.imgProxy
@@ -134,16 +163,23 @@ app.get('/api/stream', async (req, res) => {
         '-i', input,
         '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
         '-f', 'mp3', '-',
-      ], { stdio: ['ignore', 'pipe', 'ignore'] });
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let errTail = '';
+      ff.stderr.on('data', (d) => { if (errTail.length < 2000) errTail += d.toString(); });
+      ff.on('close', (code) => {
+        const nowCur = player.get().current;
+        const skipped = closed || !nowCur || nowCur.id !== curKey;
+        if (!skipped && code !== 0) console.log('[stream] ffmpeg 提前退出 code=' + code + ' | ' + errTail.slice(-300));
+      });
 
       await pipeFf(ff, () => {
-        const cur = player.get().current;
-        return closed || !cur || cur.id !== curId;
+        const nowCur = player.get().current;
+        return closed || !nowCur || nowCur.id !== curKey;
       });
 
       if (closed) break;
       // 自然播放结束 -> 前进
-      if (player.get().current && player.get().current.id === curId) player.next();
+      if (player.get().current && player.get().current.id === curKey) player.next();
       await sleep(200);
     }
     if (!res.writableEnded) res.end();
