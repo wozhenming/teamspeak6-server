@@ -142,6 +142,39 @@ const CTRL_MAP = {
   pause: 'pause', 暂停: 'pause',
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
 };
+const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
+const LOOP_MODES = {
+  all: 'all', 列表: 'all', 顺序: 'all', list: 'all',
+  one: 'one', 单曲: 'one', single: 'one',
+  shuffle: 'shuffle', 随机: 'shuffle',
+  off: 'off', 关: 'off', none: 'off',
+};
+const LOOP_LABEL = { all: '列表循环', one: '单曲循环', shuffle: '随机播放', off: '顺序播放' };
+
+// 指令是否被面板允许
+function cmdEnabled(name) {
+  const cmds = (config.chatCommands || {});
+  return cmds[name] !== false;
+}
+
+function runLoop(arg, invokerName) {
+  try {
+    const a = (arg || '').trim().toLowerCase();
+    let mode = LOOP_MODES[a];
+    let cur = player.get().loopMode;
+    if (!mode) {
+      if (a) { reply(invokerName, '循环模式：!循环 <列表|单曲|随机|关>（当前：' + (LOOP_LABEL[cur] || cur) + '）'); return; }
+      const order = ['all', 'one', 'shuffle', 'off'];
+      mode = order[(order.indexOf(cur) + 1) % order.length]; // 不给参数则循环切换
+    }
+    player.setLoop(mode);
+    reply(invokerName, '循环模式 → ' + (LOOP_LABEL[player.get().loopMode] || player.get().loopMode));
+  } catch (e) {
+    reply(invokerName, '✖ 切换循环失败：' + e.message);
+  }
+}
+
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -149,13 +182,30 @@ function handleRequest(rawText, invokerName) {
   if (ctl) {
     const w = ctl[1].toLowerCase();
     const rest = ctl[2].trim();
-    if (CTRL_MAP[w]) { runControl(CTRL_MAP[w], invokerName); return; }
-    if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) { addSong(rest, invokerName); return; }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌');
+    if (CTRL_MAP[w]) {
+      const name = CMD_NAME[CTRL_MAP[w]];
+      if (!cmdEnabled(name)) return reply(invokerName, '该指令已被管理员禁用');
+      runControl(CTRL_MAP[w], invokerName);
+      return;
+    }
+    if (LOOP_WORDS[w]) {
+      if (!cmdEnabled('loop')) return reply(invokerName, '循环指令已被管理员禁用');
+      runLoop(rest, invokerName);
+      return;
+    }
+    if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
+      if (!cmdEnabled('dian')) return reply(invokerName, '点歌指令已被管理员禁用');
+      addSong(rest, invokerName);
+      return;
+    }
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !循环');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
-  if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) addSong(text, invokerName);
+  if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) {
+    if (!cmdEnabled('dian')) return;
+    addSong(text, invokerName);
+  }
 }
 
 // 向频道回执（targetmode=2 为频道聊天）

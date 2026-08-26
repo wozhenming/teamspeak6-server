@@ -92,6 +92,13 @@ TSPages.music = async function () {
             <input type="checkbox" id="ts-chat-on">
             <span>在频道内启用聊天点歌</span>
           </label>
+          <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px" id="ts-cmd-box">
+            <label class="ts-toggle"><input type="checkbox" data-cmd="dian"> 点歌</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="play"> 播放</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="pause"> 暂停</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
+          </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
@@ -470,6 +477,10 @@ TSPages.music = async function () {
       $('ts-key').value = cfg.tsApiKey || '';
       $('ts-chat-on').checked = cfg.tsChatEnabled !== false;
       refreshChatState();
+      const cmds = cfg.chatCommands || {};
+      document.querySelectorAll('#ts-cmd-box input[data-cmd]').forEach((cb) => {
+        cb.checked = cmds[cb.dataset.cmd] !== false;
+      });
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
         return;
@@ -526,6 +537,10 @@ TSPages.music = async function () {
       const on = $('ts-chat-on').checked;
       const cfg = await API.musicTsConfig();
       const payload = { tsChatEnabled: on };
+      // 收集可用指令开关
+      const cmds = {};
+      document.querySelectorAll('#ts-cmd-box input[data-cmd]').forEach((cb) => { cmds[cb.dataset.cmd] = cb.checked; });
+      payload.chatCommands = cmds;
       if (on && !cfg.hasQueryPassword) {
         // 音乐服务还没拿到查询密码：从部署管理凭证里自动提取（.env 或容器）
         try {

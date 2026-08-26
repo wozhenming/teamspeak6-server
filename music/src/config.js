@@ -9,6 +9,9 @@ const env = (k, f) => {
   return v === undefined || v === '' ? f : v;
 };
 
+// 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，loop=循环
+const CHAT_CMD_DEFAULT = { dian: true, play: true, pause: true, next: true, loop: true };
+
 const config = {
   // music-bot 自身监听
   host: env('MUSIC_HOST', '0.0.0.0'),
@@ -49,6 +52,8 @@ const config = {
   tsChatEnabled: process.env.TS_CHAT_ENABLED !== undefined
     ? process.env.TS_CHAT_ENABLED !== '0'
     : true,
+  // 聊天点歌可用指令（面板管理哪些可用）：点歌/播放/暂停/切歌/循环
+  chatCommands: Object.assign({}, CHAT_CMD_DEFAULT),
 };
 
 // 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
@@ -66,6 +71,9 @@ function loadTsBridge() {
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
     if (o.tsQueryAdminPassword) config.tsQueryAdminPassword = o.tsQueryAdminPassword;
     if (o.tsChatEnabled != null) config.tsChatEnabled = !!o.tsChatEnabled;
+    if (o.chatCommands && typeof o.chatCommands === 'object') {
+      config.chatCommands = Object.assign({}, CHAT_CMD_DEFAULT, o.chatCommands);
+    }
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
@@ -81,6 +89,8 @@ config.saveTsBridge = (o) => {
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
     tsQueryAdminPassword: (o.tsQueryAdminPassword || '').trim() || config.tsQueryAdminPassword,
     tsChatEnabled: o.tsChatEnabled != null ? !!o.tsChatEnabled : (config.tsChatEnabled !== false),
+    chatCommands: Object.assign({}, CHAT_CMD_DEFAULT,
+      (o.chatCommands && typeof o.chatCommands === 'object') ? o.chatCommands : (config.chatCommands || {})),
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }

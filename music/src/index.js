@@ -309,6 +309,7 @@ app.get('/api/ts-bot/config', (req, res) => {
     tsApiKey: config.tsApiKey,
     tsChatEnabled: config.tsChatEnabled !== false,
     hasQueryPassword: !!config.tsQueryAdminPassword,
+    chatCommands: config.chatCommands,
   });
 });
 app.put('/api/ts-bot/config', (req, res) => {
