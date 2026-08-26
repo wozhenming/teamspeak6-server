@@ -73,6 +73,7 @@ app.get('/api/stream', async (req, res) => {
   res.set('Transfer-Encoding', 'chunked');
   res.flushHeaders && res.flushHeaders();
 
+  const { spawn } = require('child_process');
   let closed = false;
   req.on('close', () => { closed = true; });
 
@@ -90,33 +91,40 @@ app.get('/api/stream', async (req, res) => {
       try { audioUrl = (await enhanced.songUrl(curId)).url || ''; } catch (e) { audioUrl = ''; }
       if (!audioUrl) { player.next(); await sleep(300); continue; }
 
-      try {
-        // 经 neteasemusic 出口代理抓取音频（music-bot 可能无外网）
-        const source = config.imgProxy
-          ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
-          : audioUrl;
-        const up = await fetch(source);
-        if (!up.ok || !up.body) { player.next(); await sleep(300); continue; }
-        const nodeStream = Readable.fromWeb(up.body);
-        await new Promise((resolve) => {
-          let aborted = false;
-          const check = () => {
-            const cur = player.get().current;
-            if (!cur || cur.id !== curId) { aborted = true; nodeStream.destroy(); }
-          };
-          nodeStream.on('data', (chunk) => {
-            check();
-            if (aborted) return;
-            if (!res.write(chunk)) {
-              nodeStream.pause();
-              res.once('drain', () => { if (!aborted) nodeStream.resume(); });
-            }
-          });
-          nodeStream.on('end', resolve);
-          nodeStream.on('error', resolve);
-          req.on('close', () => { aborted = true; nodeStream.destroy(); resolve(); });
+      // 经 neteasemusic 出口代理抓取音频（music-bot 可能无外网）
+      const input = config.imgProxy
+        ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
+        : audioUrl;
+
+      // 用 ffmpeg 转码为稳定 MP3 流（-re 按原速推送，避免被电台客户端当成文件缓存满后回跳）
+      await new Promise((resolve) => {
+        const ff = spawn('ffmpeg', [
+          '-re',
+          '-protocol_whitelist', 'file,http,https,tcp,pipe',
+          '-i', input,
+          '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
+          '-f', 'mp3', '-',
+        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+
+        let aborted = false;
+        const check = () => {
+          const cur = player.get().current;
+          if (!cur || cur.id !== curId) { aborted = true; try { ff.kill('SIGKILL'); } catch (e) {} }
+        };
+
+        ff.stdout.on('data', (chunk) => {
+          check();
+          if (aborted) return;
+          if (!res.write(chunk)) {
+            ff.stdout.pause();
+            res.once('drain', () => { if (!aborted) ff.stdout.resume(); });
+          }
         });
-      } catch (e) { /* 忽略单首错误，进入下一首 */ }
+        ff.stdout.on('end', resolve);
+        ff.stdout.on('error', resolve);
+        ff.on('close', () => resolve());
+        req.on('close', () => { aborted = true; try { ff.kill('SIGKILL'); } catch (e) {} resolve(); });
+      });
 
       if (closed) break;
       // 自然播放结束 -> 前进
