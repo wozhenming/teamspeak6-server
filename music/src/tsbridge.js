@@ -239,7 +239,7 @@ async function ensureBot(token, serverConfigId) {
     nickname: name,
     defaultChannel: c.channel,
     volume: 50,
-    autoStart: true,
+    autoStart: false,
   });
   if (create.status !== 201 && create.status !== 200) {
     throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败'));
