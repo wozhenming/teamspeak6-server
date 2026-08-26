@@ -93,7 +93,6 @@ TSPages.music = async function () {
             <input type="checkbox" id="ts-chat-on">
             在频道内启用聊天点歌
           </label>
-          <input id="ts-chat-pwd" type="password" class="input" placeholder="serveradmin 查询密码（已配置可不填）" autocomplete="new-password">
           <div style="display:flex;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
@@ -470,9 +469,6 @@ TSPages.music = async function () {
       const cfg = await API.musicTsConfig();
       $('ts-key').value = cfg.tsApiKey || '';
       $('ts-chat-on').checked = cfg.tsChatEnabled !== false;
-      $('ts-chat-pwd').placeholder = cfg.hasQueryPassword
-        ? '查询密码已配置（留空保持不变）'
-        : 'serveradmin 查询密码（启用聊天点歌必填）';
       refreshChatState();
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
@@ -528,17 +524,23 @@ TSPages.music = async function () {
   $('btn-ts-chat-save').onclick = async () => {
     try {
       const on = $('ts-chat-on').checked;
-      const pwd = $('ts-chat-pwd').value.trim();
       const cfg = await API.musicTsConfig();
-      if (on && !pwd && !cfg.hasQueryPassword) {
-        TSUtils.toast('启用聊天点歌需先填写 serveradmin 查询密码', 'error');
-        return;
-      }
       const payload = { tsChatEnabled: on };
-      if (pwd) payload.tsQueryAdminPassword = pwd;
+      if (on && !cfg.hasQueryPassword) {
+        // 音乐服务还没拿到查询密码：从部署管理凭证里自动提取（.env 或容器）
+        try {
+          const cred = await API.deployCredentials();
+          const line = (cred.data && cred.data.lines) ? cred.data.lines.join('\n') : '';
+          const m = line.match(/password\s*=\s*"?([^"\s]+)"?/i) || line.match(/password:\s*"?([^"\s]+)"?/i);
+          if (!m || !m[1]) throw new Error('未找到 serveradmin 密码');
+          payload.tsQueryAdminPassword = m[1];
+        } catch (e) {
+          TSUtils.toast('找不到 serveradmin 密码：请在服务器 .env 设置 TS_QUERY_ADMIN_PASSWORD 后重建', 'error');
+          return;
+        }
+      }
       await API.musicTsSaveConfig(payload);
       TSUtils.toast('聊天点歌设置已保存', 'success');
-      $('ts-chat-pwd').value = '';
       await loadTsChannels();
     } catch (e) {
       TSUtils.toast('保存失败：' + e.message, 'error');
