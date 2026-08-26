@@ -549,7 +549,9 @@ app.post('/api/player/play', (req, res) => {
 });
 
 app.post('/api/player/toggle', (req, res) => {
-  ok(res, player.toggle());
+  const st = player.toggle();
+  ok(res, st);
+  if (st.playing) tsbridge.resumeRadio().catch(() => {});
 });
 
 app.post('/api/player/pause', (req, res) => {
@@ -557,7 +559,9 @@ app.post('/api/player/pause', (req, res) => {
 });
 
 app.post('/api/player/resume', (req, res) => {
-  ok(res, player.resume());
+  const st = player.resume();
+  ok(res, st);
+  if (st.playing) tsbridge.resumeRadio().catch(() => {});
 });
 
 app.post('/api/player/seek', (req, res) => {

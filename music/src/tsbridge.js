@@ -357,4 +357,17 @@ async function status() {
   }
 }
 
-module.exports = { link, unlink, status, cfg, listChannels };
+// 恢复播放时重新向机器人下达 play-radio（自愈）：暂停后 ts6-manager 机器人可能已放弃
+// 当前电台流连接，仅改本地状态不会让它重新出声；重下达后它会重新拉取 /api/stream。
+async function resumeRadio() {
+  const c = cfg();
+  const token = await getToken();
+  const bots = await getBots(token);
+  const bot = pickBot(c, bots) || bots[0];
+  if (!bot || !bot.serverConfigId) return { ok: false };
+  const stationId = await ensureStation(token, bot.serverConfigId);
+  await authFetch('POST', '/api/music-bots/' + bot.id + '/play-radio', token, { stationId });
+  return { ok: true, botId: bot.id };
+}
+
+module.exports = { link, unlink, status, cfg, listChannels, resumeRadio };

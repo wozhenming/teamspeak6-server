@@ -122,6 +122,7 @@ function runControl(cmd, invokerName) {
     if (cmd === 'play') {
       if (!st.current) player.play();
       else player.resume();
+      require('./tsbridge').resumeRadio().catch(() => {});
       reply(invokerName, st.current && st.current.title ? '▶ 已继续播放：' + st.current.title : '▶ 已开始播放');
     } else if (cmd === 'pause') {
       player.pause();
