@@ -221,7 +221,7 @@ function dispatchLine(line) {
     const p = parseParams(line);
     console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' msg=' + String(p.msg || '').slice(0, 80));
     const uid = p.invokeruid || '';
-    if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?').catch(() => {});
+    if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?');
     return;
   }
   const head = pending[0];
