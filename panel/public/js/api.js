@@ -82,6 +82,7 @@ const API = (function () {
 
     // 点歌机器人
     musicStatus: () => request('GET', '/api/music/status'),
+    musicLogout: () => request('POST', '/api/music/logout'),
     musicQrCreate: () => request('POST', '/api/music/qr/create'),
     musicQrCheck: (key) => request('GET', `/api/music/qr/check?key=${encodeURIComponent(key)}`),
     musicSearch: (q, type, limit, offset) => request('GET', `/api/music/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit || 20}&offset=${offset || 0}`),

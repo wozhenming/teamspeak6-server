@@ -9,8 +9,8 @@ const env = (k, f) => {
   return v === undefined || v === '' ? f : v;
 };
 
-// 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，loop=循环
-const CHAT_CMD_DEFAULT = { dian: true, play: true, pause: true, next: true, loop: true };
+// 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，loop=循环，status=状态
+const CHAT_CMD_DEFAULT = { dian: true, play: true, pause: true, next: true, loop: true, status: true };
 
 const config = {
   // music-bot 自身监听

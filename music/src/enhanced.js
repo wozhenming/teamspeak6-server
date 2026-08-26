@@ -124,6 +124,23 @@ async function loginStatus() {
   return res;
 }
 
+async function logout() {
+  try { await req('/logout'); } catch (e) { /* 即使上游报错也清本地 cookie */ }
+  cookies.clear();
+  saveCookies();
+  return { ok: true };
+}
+
+// 用户详情（登录后，传入 uid）——含头像/昵称/等级等
+async function userDetail(uid) {
+  return req('/user/detail', { qs: { uid } });
+}
+
+// 账号信息（登录后）——含 VIP/等级/绑定等
+async function userAccount() {
+  return req('/user/account');
+}
+
 // 当前登录账号的 VIP 信息（登录态经 cookie 生效）
 // 典型返回 data: { isVip: bool, vipType: 0无/10普通/11年费..., expireTime: 毫秒时间戳 }
 async function vipInfo() {
@@ -209,6 +226,9 @@ module.exports = {
   qrCreate,
   qrCheck,
   loginStatus,
+  logout,
+  userDetail,
+  userAccount,
   vipInfo,
   search,
   songDetail,

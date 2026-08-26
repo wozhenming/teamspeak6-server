@@ -175,6 +175,33 @@ function runLoop(arg, invokerName) {
   }
 }
 
+// !状态：正在播放 / 下一首 / 播放与循环状态
+const STATUS_WORDS = { 状态: 1, now: 1, 当前: 1, playing: 1, 正在播放: 1 };
+function mm(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+function runStatus(invokerName) {
+  try {
+    const st = player.get();
+    const all = queue.all();
+    const cur = st.current;
+    let nowTxt = '无';
+    if (cur) {
+      nowTxt = cur.title + (cur.artists ? ' - ' + cur.artists : '') + ' [' + mm(st.position) + '/' + (cur.duration ? mm(cur.duration) : '--') + ']';
+    }
+    let nextTxt = '无';
+    if (all.length) {
+      const idx = cur ? all.findIndex((i) => Number(i.id) === Number(cur.id)) : -1;
+      const nxt = (idx >= 0 && idx + 1 < all.length) ? all[idx + 1] : (st.loopMode === 'all' && all[0] ? all[0] : null);
+      if (nxt) nextTxt = nxt.title + (nxt.artists ? ' - ' + nxt.artists : '');
+    }
+    reply(invokerName,
+      '正在播放：' + nowTxt + '｜下一首：' + nextTxt + '｜' +
+      (st.playing ? '▶播放中' : '⏸已暂停') + '｜' + '循环：' + (LOOP_LABEL[st.loopMode] || st.loopMode) +
+      '｜队列：' + all.length + ' 首');
+  } catch (e) {
+    reply(invokerName, '✖ 状态查询失败：' + e.message);
+  }
+}
+
 const CMD_NAME = { play: 'play', pause: 'pause', next: 'next' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
@@ -194,12 +221,17 @@ function handleRequest(rawText, invokerName) {
       runLoop(rest, invokerName);
       return;
     }
+    if (STATUS_WORDS[w]) {
+      if (!cmdEnabled('status')) return reply(invokerName, '状态指令已被管理员禁用');
+      runStatus(invokerName);
+      return;
+    }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
       if (!cmdEnabled('dian')) return reply(invokerName, '点歌指令已被管理员禁用');
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !循环');
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）

@@ -337,38 +337,49 @@ app.get('/api/ts-bot/channels', async (req, res) => {
 // ---------- 登录状态 ----------
 app.get('/api/status', async (req, res) => {
   try {
-    // 有 MUSIC_U cookie 视为已登录（可进一步校验）
-    const loggedIn = fs.existsSync(path.join(config.dataDir, 'cookie.txt')) &&
-      /MUSIC_U=/.test(fs.readFileSync(path.join(config.dataDir, 'cookie.txt'), 'utf8') || '');
-    if (!loggedIn) return ok(res, { loggedIn: false });
+    // 以 /login/status 的真实返回为准（不靠 cookie 文件猜测）
+    const ls = await enhanced.loginStatus();
+    const d = (ls && ls.data) || {};
+    const account = d.account || null;
+    const profile = d.profile || null;
+    if (!account && !profile) return ok(res, { loggedIn: false });
 
-    // 并行取用户资料与 VIP 信息（单项失败不影响整体）
-    const [profileRes, vipRes] = await Promise.allSettled([
-      enhanced.loginStatus(),
-      enhanced.vipInfo(),
-    ]);
-
-    let profile = null;
-    if (profileRes.status === 'fulfilled') {
-      const d = profileRes.value && profileRes.value.data;
-      const p = d && d.profile;
-      profile = p ? { userId: p.userId, nickname: p.nickname || '', avatarUrl: p.avatarUrl || '' } : null;
-    }
+    // 并行补齐 VIP / 账号信息（失败不影响主信息）
+    const [vipRes, accRes] = await Promise.allSettled([enhanced.vipInfo(), enhanced.userAccount()]);
     let vip = null;
     if (vipRes.status === 'fulfilled') {
-      const d = vipRes.value && vipRes.value.data;
-      if (d) {
-        vip = {
-          isVip: !!d.isVip,
-          vipType: d.vipType != null ? d.vipType : null,       // 0无 / 10普通 / 11年费（常见值）
-          expireTime: d.expireTime != null ? d.expireTime : null, // 毫秒时间戳
-        };
-      }
+      const v = vipRes.value && vipRes.value.data;
+      if (v) vip = { isVip: !!v.isVip, vipType: v.vipType != null ? v.vipType : null, expireTime: v.expireTime != null ? v.expireTime : null };
     }
-    ok(res, { loggedIn: true, profile, vip });
+    let accountInfo = null;
+    if (accRes.status === 'fulfilled') {
+      const a = accRes.value && accRes.value.data;
+      if (a && (a.profile || a.account)) accountInfo = {
+        level: a.level != null ? a.level : null,
+        userId: (a.profile && a.profile.userId) != null ? a.profile.userId : (account && account.id),
+      };
+    }
+
+    const realProfile = profile || (accountInfo && accountInfo.profile) || null;
+    ok(res, {
+      loggedIn: true,
+      profile: realProfile ? {
+        userId: realProfile.userId != null ? realProfile.userId : (account && account.id),
+        nickname: realProfile.nickname || '',
+        avatarUrl: realProfile.avatarUrl || '',
+      } : null,
+      account: account ? { userId: account.id, level: accountInfo && accountInfo.level, bindEmail: !!account.bindEmail, bindMobile: !!account.bindMobile } : null,
+      vip,
+    });
   } catch (e) {
-    ok(res, { loggedIn: false });
+    ok(res, { loggedIn: false, error: e.message });
   }
+});
+
+// 退出登录
+app.post('/api/logout', async (req, res) => {
+  try { ok(res, await enhanced.logout()); }
+  catch (e) { fail(res, 502, 'LOGOUT_FAIL', e.message); }
 });
 
 // 独立的 VIP 信息接口

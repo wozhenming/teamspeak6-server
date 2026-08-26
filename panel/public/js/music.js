@@ -98,6 +98,7 @@ TSPages.music = async function () {
             <label class="ts-toggle"><input type="checkbox" data-cmd="pause"> 暂停</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
@@ -115,7 +116,15 @@ TSPages.music = async function () {
           <button class="btn btn-sm" id="btn-login">扫码登录</button>
         </span>
       </h3>
-      <div id="login-state" class="muted" style="font-size:12.5px">未登录（登录后可播放受版权歌曲）</div>
+      <div id="login-state" class="muted" style="font-size:12.5px;min-height:20px">未登录（登录后可播放受版权歌曲）</div>
+      <div id="login-user" hidden style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <img id="login-avatar" alt="" style="width:34px;height:34px;border-radius:50%;flex:none">
+        <div style="display:flex;flex-direction:column;gap:1px">
+          <span style="font-size:13px;font-weight:600" id="login-name"></span>
+          <span style="font-size:11px" class="muted" id="login-meta"></span>
+        </div>
+        <button class="btn btn-sm btn-danger" id="btn-logout" style="margin-left:auto">退出登录</button>
+      </div>
 
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <input type="text" id="search-q" class="input" style="flex:1;min-width:200px" placeholder="搜索歌曲 / 歌单">
@@ -237,21 +246,42 @@ TSPages.music = async function () {
     try {
       const d = await API.musicStatus();
       const el = $('login-state');
+      $('login-user').hidden = true;
       if (!d.loggedIn) {
         el.textContent = '未登录（登录后可播放受版权歌曲）';
         el.style.color = 'var(--text-muted)';
         return;
       }
-      let html = d.profile && d.profile.nickname ? ('已登录：' + esc(d.profile.nickname)) : '已登录网易云';
-      if (d.vip && d.vip.isVip) {
-        const exp = d.vip.expireTime ? new Date(d.vip.expireTime).toISOString().slice(0, 10) : '';
-        html += ` <span class="fee-badge fee-vip">VIP${d.vip.vipType === 11 ? '·年费' : ''}${exp ? ' · ' + exp + ' 到期' : ''}</span>`;
-      } else {
-        html += ' <span class="fee-badge fee-none">非VIP</span>';
+      el.textContent = '';
+      el.style.color = 'var(--text-muted)';
+      const p = d.profile || {};
+      $('login-name').textContent = p.nickname || '已登录网易云';
+      $('login-avatar').src = p.avatarUrl ? API.musicImg(p.avatarUrl.replace(/^https?:/, ''), '68y68') : '';
+      let meta = '';
+      if (d.vip) {
+        if (d.vip.isVip) {
+          const exp = d.vip.expireTime ? new Date(d.vip.expireTime).toISOString().slice(0, 10) : '';
+          meta = `<span class="fee-badge fee-vip">VIP${d.vip.vipType === 11 ? '·年费' : ''}${exp ? ' · ' + exp + ' 到期' : ''}</span>`;
+        } else {
+          meta = '<span class="fee-badge fee-none">非VIP</span>';
+        }
       }
-      el.innerHTML = html;
-      el.style.color = 'var(--green)';
+      if (d.account && d.account.level) meta += '<span style="margin-left:6px">Lv.' + d.account.level + '</span>';
+      $('login-meta').innerHTML = meta || '';
+      $('login-user').hidden = false;
     } catch (e) { /* 服务不可用 */ }
+  }
+
+  // ---------- 退出登录 ----------
+  async function doLogout() {
+    if (!confirm('确定退出网易云登录吗？')) return;
+    try {
+      await API.musicLogout();
+      TSUtils.toast('已退出登录', 'success');
+      await refreshLogin();
+    } catch (e) {
+      TSUtils.toast('退出失败：' + e.message, 'error');
+    }
   }
 
   // ---------- 扫码登录 ----------
@@ -432,6 +462,7 @@ TSPages.music = async function () {
 
   // ---------- 事件 ----------
   $('btn-login').onclick = openQrModal;
+  $('btn-logout').onclick = doLogout;
   $('btn-search').onclick = () => { searchPage = 1; doSearch(); };
   $('search-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { searchPage = 1; doSearch(); } });
   $('search-type').onchange = (e) => { searchType = e.target.value; searchPage = 1; };
