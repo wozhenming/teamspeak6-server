@@ -55,6 +55,25 @@ function absorb(setCookieHeader) {
   saveCookies();
 }
 
+// 保存完整登录 cookie：保留所有真实会话 cookie（MUSIC_U/MUSIC_R_U/MUSIC_R_T/MUSIC_SNS/NMTID/__csrf 等），
+// 仅剔除 Set-Cookie 里的属性行（Max-Age/Expires/Path/Domain/SameSite）。
+// 与 absorb 不同：absorb 只收白名单，会丢掉 /login/status 判定可能用到的 cookie。
+function absorbLogin(cookieStr) {
+  if (!cookieStr) return;
+  const parts = Array.isArray(cookieStr) ? cookieStr : String(cookieStr).split(';');
+  for (const seg of parts) {
+    const s = String(seg).trim();
+    if (!s) continue;
+    const eq = s.indexOf('=');
+    if (eq <= 0) continue;
+    const name = s.slice(0, eq).trim();
+    const value = s.slice(eq + 1).trim();
+    if (/^(Max-Age|Expires|Path|Domain|Secure|HttpOnly|SameSite|Priority)$/i.test(name)) continue;
+    cookies.set(name, value);
+  }
+  saveCookies();
+}
+
 function cookieHeader() {
   return Array.from(cookies.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
@@ -122,7 +141,7 @@ async function qrCheck(key) {
     const c = res.cookie || (res.data && res.data.cookie) || '';
     if (c) {
       console.log('[login] 803 吸收 cookie len=' + c.length + ' 含MUSIC_U=' + /MUSIC_U=/.test(c));
-      absorb(c);
+      absorbLogin(c); // 保留完整会话 cookie，保证 /login/status 识别
     } else {
       console.log('[login] 803 但响应无 cookie 字段');
     }
