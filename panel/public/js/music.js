@@ -113,6 +113,7 @@ TSPages.music = async function () {
     <div class="card">
       <h3><span>网易云点歌</span>
         <span>
+          <button class="btn btn-sm" id="btn-login-refresh" title="刷新登录状态">↻</button>
           <button class="btn btn-sm" id="btn-login">扫码登录</button>
         </span>
       </h3>
@@ -464,6 +465,7 @@ TSPages.music = async function () {
 
   // ---------- 事件 ----------
   $('btn-login').onclick = openQrModal;
+  $('btn-login-refresh').onclick = () => { refreshLogin(); };
   $('btn-logout').onclick = doLogout;
   $('btn-search').onclick = () => { searchPage = 1; doSearch(); };
   $('search-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { searchPage = 1; doSearch(); } });

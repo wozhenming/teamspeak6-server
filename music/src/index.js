@@ -343,6 +343,8 @@ app.get('/api/status', async (req, res) => {
     const account = d.account || null;
     const profile = d.profile || null;
     if (!account && !profile) return ok(res, { loggedIn: false });
+    // 匿名账号（未真正登录，如扫码前的匿名 token）不算已登录
+    if (account && account.anonimousUser === true) return ok(res, { loggedIn: false, anonymous: true });
 
     // VIP 以 account.vipType 为准（11=黑胶VIP, 3=黑胶SVIP, 0=非会员），profile.vipType 兜底
     const vt = (account && account.vipType != null ? account.vipType
