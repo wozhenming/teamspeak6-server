@@ -52,6 +52,7 @@ function enqueue(song, requestedBy) {
     album: song.album || '',
     cover: song.cover || '',
     duration: song.duration || 0,
+    fee: song.fee != null ? song.fee : null, // 版权：0免费 1VIP 4购专辑 8非会员可听低音质
     requestedBy: requestedBy || 'panel',
     requestedAt: Date.now(),
   };
@@ -72,6 +73,7 @@ function enqueueMany(songs, requestedBy) {
       album: song.album || '',
       cover: song.cover || '',
       duration: song.duration || 0,
+      fee: song.fee != null ? song.fee : null,
       requestedBy: requestedBy || 'panel',
       requestedAt: Date.now(),
     }));

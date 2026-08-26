@@ -64,6 +64,36 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const songIdCache = {}; // 队列条目内部 id -> 网易云歌曲 id（旧数据自愈用）
 const urlCache = new Map(); // 网易云歌曲 id -> { url, at }（直链缓存，避免 seek/恢复时反复请求）
 const URL_TTL = 8 * 60 * 1000;
+let SILENCE_BUF = null; // 预生成的静音 MP3（约2秒，32kbps），暂停/空闲直接回放，零延迟零毛刺
+
+function generateSilence() {
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const chunks = [];
+    const ff = spawn('ffmpeg', [
+      '-hide_banner', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+      '-acodec', 'libmp3lame', '-ab', '32k', '-t', '2', '-f', 'mp3', '-',
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    ff.stdout.on('data', (c) => chunks.push(c));
+    ff.on('error', () => resolve(null));
+    ff.on('close', () => resolve(chunks.length ? Buffer.concat(chunks) : null));
+  });
+}
+
+// 探测音频真实可播时长（试听片段/版权截断的文件本身较短，元数据时长不准）
+function probeDuration(input) {
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const p = spawn('ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', input,
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch (e) {} }, 10000);
+    p.stdout.on('data', (c) => { out += c.toString(); });
+    p.on('error', () => { clearTimeout(t); resolve(0); });
+    p.on('close', () => { clearTimeout(t); const v = parseFloat(out.trim()); resolve(Number.isFinite(v) && v > 0 ? v : 0); });
+  });
+}
 
 app.get('/api/stream', async (req, res) => {
   // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
@@ -103,22 +133,36 @@ app.get('/api/stream', async (req, res) => {
     req.on('close', () => finish());
   });
 
-  // 空闲时持续推送静音，保证电台流永不断流（否则机器人解码器会停摆/放弃，之后有歌也没声音）
+  // 过渡垫片：切歌/暂停/恢复边界先补一小段干净静音帧，
+  // 掩盖被 SIGKILL 的 ffmpeg 留下的半截 MP3 帧（否则解码器会出“电音”杂音）
+  const padSilence = async (ms) => {
+    if (!SILENCE_BUF) return;
+    const bytes = Math.max(64, Math.ceil(ms / 1000 * 4000)); // 32kbps ≈ 4KB/s
+    let written = 0, pos = 0;
+    while (written < bytes && !closed && !res.writableEnded) {
+      const n = Math.min(1024, bytes - written, SILENCE_BUF.length - pos);
+      const okWrite = res.write(SILENCE_BUF.subarray(pos, pos + n));
+      pos = (pos + n) % SILENCE_BUF.length;
+      written += n;
+      if (!okWrite) await new Promise((r) => res.once('drain', r));
+    }
+  };
+
+  // 空闲/暂停：直接回放预生成静音缓冲（纯内存，无进程开销，暂停/恢复零延迟）
   const streamSilence = () => new Promise((resolve) => {
-    const ff = spawn('ffmpeg', [
-      '-re', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-      '-acodec', 'libmp3lame', '-ab', '32k', '-f', 'mp3', '-',
-    ], { stdio: ['ignore', 'pipe', 'ignore'] });
-    const done = () => closed || (() => { const st = player.get(); return !!(st.current && st.playing); })();
-    const iv = setInterval(() => {
+    let pos = 0;
+    const tick = () => {
       const st = player.get();
-      if (closed || (st.current && st.playing)) {
-        clearInterval(iv);
-        try { ff.kill('SIGKILL'); } catch (e) {}
-        resolve();
-      }
-    }, 500);
-    pipeFf(ff, () => closed).then(() => { clearInterval(iv); resolve(); });
+      if (closed || res.writableEnded || (st.current && st.playing)) return resolve();
+      if (!SILENCE_BUF) { setTimeout(tick, 200); return; }
+      if (pos >= SILENCE_BUF.length) pos = 0;
+      const end = Math.min(pos + 1024, SILENCE_BUF.length); // ~250ms @32kbps
+      const okWrite = res.write(SILENCE_BUF.subarray(pos, end));
+      pos = end;
+      if (okWrite) setTimeout(tick, 230);
+      else res.once('drain', () => setTimeout(tick, 50));
+    };
+    tick();
   });
 
   const pump = async () => {
@@ -196,6 +240,9 @@ app.get('/api/stream', async (req, res) => {
 
       // 从当前进度起播（seek/恢复播放时 >0），-ss 走输入端快速跳转
       const startPos = Math.max(0, Math.floor(player.get().position) || 0);
+      // 先垫一小段干净静音，掩盖上一段被终止的半截帧
+      await padSilence(startPos > 0 ? 250 : 150);
+      if (closed) break;
       const ffArgs = ['-re', '-protocol_whitelist', 'file,http,https,tcp,pipe'];
       if (startPos > 0) ffArgs.push('-ss', String(startPos));
       ffArgs.push('-i', input, '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', '-f', 'mp3', '-');
@@ -208,6 +255,22 @@ app.get('/api/stream', async (req, res) => {
         const interrupted = closed || !nowCur || nowCur.id !== curKey || player.get().rev !== revAtStart;
         if (!interrupted && code !== 0) console.log('[stream] ffmpeg 提前退出 code=' + code + ' | ' + errTail.slice(-300));
       });
+
+      // 后台探测真实可播时长（试听/版权截断文件比元数据短），修正队列时长与自动切歌
+      if (!cur.realDurProbed && neteaseId) {
+        cur.realDurProbed = true;
+        probeDuration(input).then((realSec) => {
+          if (realSec > 0) {
+            const real = Math.round(realSec);
+            const meta = cur.duration || 0;
+            if (!meta || Math.abs(meta - real) >= 3) {
+              console.log('[stream] 实际可播 ' + real + 's（元数据 ' + meta + 's）id=' + neteaseId);
+              cur.duration = real;
+              try { queue.save(); } catch (e) {}
+            }
+          }
+        }).catch(() => {});
+      }
 
       await pipeFf(ff, () => {
         const s = player.get();
@@ -324,6 +387,8 @@ app.get('/api/search', async (req, res) => {
         album: (s.al || {}).name || '',
         duration: s.dt ? Math.round(s.dt / 1000) : 0,
         cover: (s.al || {}).picUrl || '',
+        fee: s.fee != null ? s.fee : null,
+        noCopyright: !!s.noCopyrightRcmd,
       }));
     }
     ok(res, data);
@@ -409,6 +474,7 @@ app.post('/api/queue', (req, res) => {
       album: s.album || '',
       cover: s.cover || '',
       duration: s.duration || 0,
+      fee: s.fee != null ? s.fee : null,
     }, s.requestedBy);
     ok(res, { item });
   }
@@ -509,7 +575,10 @@ async function resolveStreamPublicUrl() {
   console.log('[music-bot] 警告：未能自动获取公网 IP，回退到内网地址', config.streamPublicUrl, '（ts6-manager 可能拒绝，建议设置 STREAM_PUBLIC_HOST）');
 }
 
-resolveStreamPublicUrl().then(() => {
+Promise.all([
+  resolveStreamPublicUrl(),
+  generateSilence().then((b) => { SILENCE_BUF = b; if (!b) console.log('[music-bot] 静音缓冲生成失败，暂停过渡将无垫片'); }),
+]).then(() => {
   const server = app.listen(config.port, config.host, () => {
     console.log(`[music-bot] 点歌服务已启动 ${config.host}:${config.port}`);
     console.log(`[music-bot] 网易云 API: ${config.apiBase}`);

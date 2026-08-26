@@ -183,6 +183,7 @@ async function playlistTracks(id, limit = 60, offset = 0) {
     artists: (s.ar || []).map(a => a.name).join(' '),
     album: (s.al || {}).name || '',
     duration: s.dt ? Math.round(s.dt / 1000) : 0,
+    fee: s.fee != null ? s.fee : null,
   }));
 }
 

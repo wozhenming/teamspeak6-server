@@ -32,6 +32,13 @@ TSPages.music = async function () {
   const token = TSUtils.navToken();
 
   content.innerHTML = `
+    <style>
+      .fee-badge{display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;font-size:10.5px;line-height:16px;vertical-align:1px;white-space:nowrap}
+      .fee-free{background:#e6f7ec;color:#18a058}
+      .fee-vip{background:#fff1d6;color:#c47b00}
+      .fee-alb{background:#e6f0ff;color:#2b6cb0}
+      .fee-none{background:#ececec;color:#8a8a8a;text-decoration:line-through}
+    </style>
     <div id="music-alert"></div>
 
     <div class="card music-player" id="player-card">
@@ -133,6 +140,15 @@ TSPages.music = async function () {
     if (n > 10000) return (n / 10000).toFixed(1) + '万';
     return String(n);
   }
+  // 版权标识：fee 0免费/无版权 1VIP 4购专辑 8非会员可听低音质
+  function feeBadge(fee, noCopyright) {
+    if (noCopyright) return '<span class="fee-badge fee-none">无版权</span>';
+    if (fee === 1) return '<span class="fee-badge fee-vip">VIP</span>';
+    if (fee === 4) return '<span class="fee-badge fee-alb">专辑</span>';
+    if (fee === 8) return '<span class="fee-badge fee-free">免费听</span>';
+    if (fee === 0) return '<span class="fee-badge fee-free">免费</span>';
+    return '';
+  }
 
   // ---------- 通用分页条 ----------
   function pager(page, pages, onGo) {
@@ -157,7 +173,7 @@ TSPages.music = async function () {
     if (token !== TSUtils.navToken()) return;
     const st = playerState;
     $('player-cover').src = st.current && st.current.cover ? API.musicImg(st.current.cover, '112y112') : '';
-    $('player-title').textContent = st.current ? st.current.title : '未在播放';
+    $('player-title').innerHTML = st.current ? (esc(st.current.title) + feeBadge(st.current.fee)) : '未在播放';
     $('player-artists').textContent = st.current ? (st.current.artists || '') : '';
     $('player-mode').textContent = st.queueLength ? `（队列 ${st.queueLength} 首）` : '';
     $('btn-toggle').innerHTML = st.playing ? TSUtils.icons.pause : TSUtils.icons.play;
@@ -284,11 +300,11 @@ TSPages.music = async function () {
       } else {
         box.innerHTML = `<div style="font-size:12px" class="muted">共 ${fmtNum(d.total)} 首</div><div class="table-wrap"><table>
           <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
-           <tbody>${d.items.map(s => `<tr>
-             <td class="song-cell">${thumb(s.cover)}<span>${esc(s.name)} <span class="muted">- ${esc(s.artists)}</span></span></td>
+       <tbody>${d.items.map(s => `<tr>
+             <td class="song-cell">${thumb(s.cover)}<span>${esc(s.name)}${feeBadge(s.fee, s.noCopyright)} <span class="muted">- ${esc(s.artists)}</span></span></td>
              <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
-            <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration, cover: s.cover }).replace(/"/g, '&quot;')}'>点歌</button></td>
-          </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
+            <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration, cover: s.cover, fee: s.fee }).replace(/"/g, '&quot;')}'>点歌</button></td>
+           </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       }
     } catch (e) {
       box.innerHTML = `<div class="alert error">${esc(e.message)}</div>`;
@@ -336,9 +352,9 @@ TSPages.music = async function () {
       box.innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
         <tbody>${list.slice(start, start + pageSize).map(t => `<tr>
-           <td class="song-cell">${thumb(t.cover)}<span>${esc(t.name)} <span class="muted">- ${esc(t.artists)}</span></span></td>
+           <td class="song-cell">${thumb(t.cover)}<span>${esc(t.name)}${feeBadge(t.fee)} <span class="muted">- ${esc(t.artists)}</span></span></td>
              <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
-           <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover }).replace(/"/g, '&quot;')}'>点歌</button></td>
+           <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee }).replace(/"/g, '&quot;')}'>点歌</button></td>
         </tr>`).join('')}</tbody></table></div>${pager(page, pages, (p) => { page = p; render(); })}
         <div class="modal-footer">
           <button class="btn btn-primary" id="pl-add-all">全部加入队列（${all.length}）</button>
@@ -374,7 +390,7 @@ TSPages.music = async function () {
         <thead><tr><th>#</th><th>歌曲</th><th>点歌人</th><th class="actions">操作</th></tr></thead>
         <tbody>${items.map((it, i) => `<tr>
           <td>${i + 1}</td>
-           <td class="song-cell">${thumb(it.cover)}<span>${esc(it.title)} <span class="muted">- ${esc(it.artists)}</span></span></td>
+           <td class="song-cell">${thumb(it.cover)}<span>${esc(it.title)}${feeBadge(it.fee)} <span class="muted">- ${esc(it.artists)}</span></span></td>
           <td>${esc(it.requestedBy)}</td>
           <td class="actions">
             <button class="btn btn-sm" data-play="${it.id}">播放</button>
