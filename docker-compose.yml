@@ -111,7 +111,7 @@ services:
       - TS6MGR_CHANNEL=${TS6MGR_CHANNEL:-}
       # 电台音频流对外地址：ts6-manager 的 SSRF 防护会拒绝内网主机名（如 music），
       # 故必须填“对 ts6-manager 可达且非内网”的地址（通常是服务器公网 IP/域名）。
-      # 例：STREAM_PUBLIC_HOST=8.134.136.98 → http://8.134.136.98:3200/api/stream
+      # 例：STREAM_PUBLIC_HOST=8.*.*.98 → http://8.*.*.98:3200/api/stream
       # 也可直接给完整地址覆盖：STREAM_PUBLIC_URL=http://your.domain:3200/api/stream
       - STREAM_PUBLIC_URL=${STREAM_PUBLIC_URL:-}
       - STREAM_PUBLIC_HOST=${STREAM_PUBLIC_HOST:-}

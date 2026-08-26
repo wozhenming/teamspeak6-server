@@ -34,7 +34,7 @@ const config = {
   // ts6-manager 拉取本服务音频流所用的地址。
   // 注意：ts6-manager 的 SSRF 防护会拒绝解析到内网 IP 的主机名（如 music/teamspeak），
   // 因此这里必须填“对 ts6-manager 而言可达且非内网”的地址，通常是服务器公网 IP/域名。
-  // 例：STREAM_PUBLIC_HOST=8.134.136.98 → http://8.134.136.98:3200/api/stream
+  // 例：STREAM_PUBLIC_HOST=8.*.*.98 → http://8.*.*.98:3200/api/stream
   streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://' + env('STREAM_PUBLIC_HOST', 'music') + ':3200/api/stream'),
   // 音频流访问令牌（避免电台流被公网随意收听；ts6-manager 的电台 URL 会带上 ?t=）
   streamToken: env('STREAM_TOKEN', 'ts6bot'),
