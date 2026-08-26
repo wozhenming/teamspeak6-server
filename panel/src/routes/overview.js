@@ -13,6 +13,7 @@
 
 const express = require('express');
 const { ts } = require('../webquery');
+const { smoothIdle, smoothConnected } = require('../utils/smooth');
 
 const router = express.Router();
 
@@ -44,15 +45,16 @@ function computeRates(server) {
 }
 
 function mapClient(c) {
+  const clid = Number(c.clid);
   return {
-    clid: Number(c.clid),
+    clid,
     cid: Number(c.cid),
     nickname: c.client_nickname || '?',
     uid: c.client_unique_identifier || '',
     country: c.client_country || '',
     ping: c.connection_ping != null ? c.connection_ping : c.client_ping,
-    connected_seconds: c.client_connected_time != null ? c.client_connected_time : c.connection_connected_time,
-    idle_seconds: c.client_idle_time != null ? c.client_idle_time : c.connection_idle_time,
+    connected_seconds: smoothConnected(clid, c.client_connected_time != null ? c.client_connected_time : c.connection_connected_time),
+    idle_seconds: smoothIdle(clid, c.client_idle_time != null ? c.client_idle_time : c.connection_idle_time),
     away: c.client_away === 1 || c.client_away === '1',
     is_query: String(c.client_type) === '1',
   };
