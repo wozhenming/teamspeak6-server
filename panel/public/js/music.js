@@ -87,16 +87,16 @@ TSPages.music = async function () {
           <span class="muted" style="font-size:12px">TeamSpeak WebQuery API Key</span>
           <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
-        <div style="display:flex;flex-direction:column;gap:3px;border-top:1px dashed var(--border);padding-top:8px">
-          <span class="muted" style="font-size:12px">频道聊天点歌（用户发送 !点歌 &lt;歌曲ID或链接&gt;）</span>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
-            <input type="checkbox" id="ts-chat-on">
-            在频道内启用聊天点歌
+        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" id="ts-chat-on" style="flex:none;margin:0">
+            <span>在频道内启用聊天点歌</span>
           </label>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
+          <div class="muted" style="font-size:11px">用户发送 <code>!点歌 &lt;歌曲ID或网易云链接&gt;</code> 即可点歌</div>
         </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
