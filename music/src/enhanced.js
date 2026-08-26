@@ -48,6 +48,8 @@ function absorb(setCookieHeader) {
       const value = seg.slice(idx + 1).trim();
       if (name === 'MUSIC_U' || name === 'os' || name === 'osver' || name === 'appver' ||
           name === 'NMTID' || name === 'MUSIC_A_T' || name === 'MUSIC_A_N' || name === '__csrf') {
+        // 防御：不要让「过期/清空」的 MUSIC_U（value 为空，常出现在非登录请求的 set-cookie 里）覆盖已登录的会话
+        if (name === 'MUSIC_U' && !value && cookies.get('MUSIC_U')) continue;
         cookies.set(name, value);
       }
     }
@@ -76,6 +78,11 @@ function absorbLogin(cookieStr) {
 
 function cookieHeader() {
   return Array.from(cookies.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+// 当前 jar 是否含非空 MUSIC_U（诊断用）
+function hasLoginCookie() {
+  return !!(cookies.get('MUSIC_U') || '').trim();
 }
 
 // ---------- 基础请求 ----------
@@ -268,4 +275,5 @@ module.exports = {
   playlist,
   playlistTracks,
   playlistTracksAll,
+  hasLoginCookie,
 };
