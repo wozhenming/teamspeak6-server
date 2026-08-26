@@ -40,8 +40,11 @@ const config = {
   // 因此这里必须填“对 ts6-manager 而言可达且非内网”的地址，通常是服务器公网 IP/域名。
   // 例：STREAM_PUBLIC_HOST=8.*.*.98 → http://8.*.*.98:3200/api/stream
   streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://' + env('STREAM_PUBLIC_HOST', 'music') + ':3200/api/stream'),
-  // 音频流访问令牌（避免电台流被公网随意收听；ts6-manager 的电台 URL 会带上 ?t=）
-  streamToken: env('STREAM_TOKEN', 'ts6bot'),
+  // 音频流访问令牌安全开关：开启时要求 ?t=<token>，防公网随意收听；面板可开关并生成显示。
+  streamTokenEnabled: process.env.STREAM_TOKEN_ENABLED !== undefined
+    ? process.env.STREAM_TOKEN_ENABLED !== '0'
+    : true,
+  streamToken: env('STREAM_TOKEN', ''),
   // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，自动建连）
   tsHost: env('TS_HOST', 'teamspeak'),
   tsWebqueryPort: parseInt(env('TS_WEBQUERY_PORT', '10080'), 10),
@@ -74,6 +77,8 @@ function loadTsBridge() {
     if (o.chatCommands && typeof o.chatCommands === 'object') {
       config.chatCommands = Object.assign({}, CHAT_CMD_DEFAULT, o.chatCommands);
     }
+    if (o.streamTokenEnabled != null) config.streamTokenEnabled = !!o.streamTokenEnabled;
+    if (o.streamToken) config.streamToken = o.streamToken;
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
@@ -91,6 +96,8 @@ config.saveTsBridge = (o) => {
     tsChatEnabled: o.tsChatEnabled != null ? !!o.tsChatEnabled : (config.tsChatEnabled !== false),
     chatCommands: Object.assign({}, CHAT_CMD_DEFAULT,
       (o.chatCommands && typeof o.chatCommands === 'object') ? o.chatCommands : (config.chatCommands || {})),
+    streamTokenEnabled: o.streamTokenEnabled != null ? !!o.streamTokenEnabled : (config.streamTokenEnabled !== false),
+    streamToken: (o.streamToken || '').trim() || config.streamToken,
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }

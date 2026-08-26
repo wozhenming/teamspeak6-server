@@ -3,6 +3,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { Readable } = require('stream');
 const { config } = require('./config');
 const enhanced = require('./enhanced');
@@ -98,7 +99,7 @@ function probeDuration(input) {
 
 app.get('/api/stream', async (req, res) => {
   // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
-  if (config.streamToken && req.query.t !== config.streamToken) {
+  if (config.streamTokenEnabled && config.streamToken && req.query.t !== config.streamToken) {
     return res.status(403).end('forbidden');
   }
   res.set('Content-Type', 'audio/mpeg');
@@ -310,14 +311,21 @@ app.get('/api/ts-bot/config', (req, res) => {
     tsChatEnabled: config.tsChatEnabled !== false,
     hasQueryPassword: !!config.tsQueryAdminPassword,
     chatCommands: config.chatCommands,
+    streamTokenEnabled: config.streamTokenEnabled !== false,
+    streamToken: config.streamToken || '',
   });
 });
 app.put('/api/ts-bot/config', (req, res) => {
   try {
-    const out = config.saveTsBridge(req.body || {});
+    const body = req.body || {};
+    // 开启令牌且面板请求生成（streamToken===''）→ 始终随机生成，覆盖可能不安全的默认值
+    if (body.streamTokenEnabled === true && body.streamToken === '') {
+      body.streamToken = crypto.randomBytes(16).toString('hex');
+    }
+    const out = config.saveTsBridge(body);
     // 聊天点歌配置可能变化：热应用（启停/重连）
     tschat.applyConfig();
-    ok(res, { ...out, tsChatEnabled: config.tsChatEnabled !== false, hasQueryPassword: !!config.tsQueryAdminPassword });
+    ok(res, { ...out, tsChatEnabled: config.tsChatEnabled !== false, hasQueryPassword: !!config.tsQueryAdminPassword, streamToken: config.streamToken || '' });
   } catch (e) { fail(res, 500, 'CFG_FAIL', e.message); }
 });
 // 频道聊天点歌运行状态

@@ -89,6 +89,16 @@ TSPages.music = async function () {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <label class="ts-toggle" style="font-size:12.5px">
+            <input type="checkbox" id="ts-token-on">
+            <span>开启音频流令牌（防公网随意收听）</span>
+          </label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-sm" id="btn-ts-token-save">生成并保存</button>
+            <code id="ts-token-val" style="font-size:11px;word-break:break-all;flex:1;min-width:120px"></code>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+          <label class="ts-toggle" style="font-size:12.5px">
             <input type="checkbox" id="ts-chat-on">
             <span>在频道内启用聊天点歌</span>
           </label>
@@ -516,6 +526,8 @@ TSPages.music = async function () {
       document.querySelectorAll('#ts-cmd-box input[data-cmd]').forEach((cb) => {
         cb.checked = cmds[cb.dataset.cmd] !== false;
       });
+      $('ts-token-on').checked = cfg.streamTokenEnabled !== false;
+      $('ts-token-val').textContent = cfg.streamTokenEnabled !== false && cfg.streamToken ? cfg.streamToken : '未开启';
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
         return;
@@ -551,6 +563,20 @@ TSPages.music = async function () {
       try { await API.musicTsSaveConfig({ tsApiKey: key, ts6mgrChannel: ch }); } catch (e) { /* 忽略 */ }
     }
     loadTsChannels();
+  };
+
+  // ---------- 音频流令牌 ----------
+  $('btn-ts-token-save').onclick = async () => {
+    try {
+      const on = $('ts-token-on').checked;
+      const payload = { streamTokenEnabled: on };
+      if (on) payload.streamToken = ''; // 由后端自动生成新令牌
+      const r = await API.musicTsSaveConfig(payload);
+      TSUtils.toast(on ? '已开启，令牌已生成' : '已关闭音频流令牌', 'success');
+      $('ts-token-val').textContent = r.streamToken || '未开启';
+    } catch (e) {
+      TSUtils.toast('保存失败：' + e.message, 'error');
+    }
   };
 
   // ---------- 频道聊天点歌设置 ----------
