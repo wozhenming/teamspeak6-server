@@ -45,10 +45,6 @@ const config = {
   tsApiKey: env('TS_API_KEY', ''),
   // TS 服务器管理员密码（仅用于首次自动生成 API Key；留空则需手动在 .env 配 TS_API_KEY）
   tsQueryAdminPassword: env('TS_QUERY_ADMIN_PASSWORD', ''),
-  // 内部：上次成功应用到 ts6-manager 的连接参数（host/port/keyHash），用于去重更新
-  appliedHost: '',
-  appliedPort: 0,
-  appliedKeyHash: '',
 };
 
 // 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
@@ -64,10 +60,6 @@ function loadTsBridge() {
     if (o.tsHost) config.tsHost = o.tsHost;
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
-    // 内部记录：上次应用到 ts6-manager 的连接参数（避免每次都 PUT 触发其重连）
-    if (o.appliedHost != null) config.appliedHost = o.appliedHost;
-    if (o.appliedPort != null) config.appliedPort = o.appliedPort;
-    if (o.appliedKeyHash != null) config.appliedKeyHash = o.appliedKeyHash;
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
@@ -81,9 +73,6 @@ config.saveTsBridge = (o) => {
     tsHost: (o.tsHost || '').trim() || config.tsHost,
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
-    appliedHost: o.appliedHost != null ? String(o.appliedHost) : (config.appliedHost || ''),
-    appliedPort: o.appliedPort != null ? parseInt(o.appliedPort, 10) : (config.appliedPort || 0),
-    appliedKeyHash: o.appliedKeyHash != null ? String(o.appliedKeyHash) : (config.appliedKeyHash || ''),
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }

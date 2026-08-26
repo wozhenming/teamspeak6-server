@@ -10,7 +10,23 @@
  * 仅在配置了 TS6MGR_URL / TS6MGR_USER / TS6MGR_PASS 时启用。
  */
 
+const crypto = require('crypto');
 const { config } = require('./config');
+
+// 管理员 token 缓存：避免面板每次轮询/切页都重新登录（auth 接口有 15次/15分钟 限流）
+let tokenCache = { token: null, user: null, at: 0 };
+const TOKEN_TTL = 10 * 60 * 1000;
+function invalidateToken() { tokenCache = { token: null, user: null, at: 0 }; }
+
+async function getToken() {
+  const c = cfg();
+  if (tokenCache.token && tokenCache.user === c.user && Date.now() - tokenCache.at < TOKEN_TTL) {
+    return tokenCache.token;
+  }
+  const token = await ensureAdmin();
+  tokenCache = { token, user: c.user, at: Date.now() };
+  return token;
+}
 
 function cfg() {
   return {
@@ -84,52 +100,43 @@ async function getServers(token) {
   return list;
 }
 
-// 连接参数指纹（host/port/keyHash），用于判断是否真的需要更新 ts6-manager
-function connFingerprint(apiKey, c) {
-  const crypto = require('crypto');
-  return {
-    host: String(c.tsHost || ''),
-    port: Number(c.tsWebqueryPort || 0),
-    keyHash: apiKey ? crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 32) : '',
-  };
+// 连接指纹：Key/host/port 任一变化才需要刷新 ts6-manager 里的连接配置
+// （绝不能在页面浏览等被动路径上无条件 PUT——会触发对端重置连接池，造成音频毛刺）
+function connHash(c) {
+  return crypto.createHash('sha1').update(c.tsApiKey + '|' + c.tsHost + '|' + c.tsWebqueryPort).digest('hex');
 }
+let appliedConnHash = null;
 
-// 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建。
-// 注意：配置未变化时绝不重复 PUT —— 每次 PUT 都会让 ts6-manager 重连其查询客户端，
-// 面板每次进入点歌页都会拉频道列表，频繁重连会造成音乐机器人音频抖动（电音）。
+// 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建
 async function ensureServer(token, c) {
   const apiKey = await resolveApiKey();
-  const want = connFingerprint(apiKey, c);
   const list = await getServers(token);
-  const existing = list.find((s) => s && (s.host === want.host || (want.host && s.host && s.host.includes(want.host))));
+  const existing = list.find((s) => s && (s.host === c.tsHost || (c.tsHost && s.host && s.host.includes(c.tsHost))));
   if (existing) {
-    const unchanged =
-      Number(existing.webqueryPort) === want.port &&
-      config.appliedHost === want.host &&
-      Number(config.appliedPort) === want.port &&
-      config.appliedKeyHash === want.keyHash;
-    if (unchanged) return existing.id;
-    // 有实际变化才刷新（如更换了 API Key / 主机 / 端口）
-    await authFetch('PUT', '/api/servers/' + existing.id, token, {
-      name: existing.name || 'TeamSpeak',
-      host: want.host,
-      webqueryPort: want.port,
-      apiKey,
-    });
-    try { config.saveTsBridge({ appliedHost: want.host, appliedPort: String(want.port), appliedKeyHash: want.keyHash }); } catch (e) {}
+    // 仅当 Key/host/port 实际变化时才刷新连接配置
+    const h = connHash(c);
+    if (appliedConnHash !== h) {
+      await authFetch('PUT', '/api/servers/' + existing.id, token, {
+        name: existing.name || 'TeamSpeak',
+        host: c.tsHost,
+        webqueryPort: c.tsWebqueryPort,
+        apiKey,
+      });
+      appliedConnHash = h;
+    }
     return existing.id;
   }
   const created = await authFetch('POST', '/api/servers', token, {
     name: 'TeamSpeak',
-    host: want.host,
-    webqueryPort: want.port,
+    host: c.tsHost,
+    webqueryPort: c.tsWebqueryPort,
     apiKey,
   });
   if (created.status !== 201 && created.status !== 200) {
     throw new Error(apiErrText(created.status, created.json, '自动创建 TS 连接失败') + '；请确认 TS_API_KEY 正确');
   }
   const s = (created.json && (created.json.data || created.json));
-  try { config.saveTsBridge({ appliedHost: want.host, appliedPort: String(want.port), appliedKeyHash: want.keyHash }); } catch (e) {}
+  appliedConnHash = connHash(c);
   return s.id;
 }
 
@@ -201,7 +208,7 @@ async function getChannels(token, configId) {
 }
 
 async function listChannels() {
-  const token = await ensureAdmin();
+  const token = await getToken();
   const c = cfg();
   const serverConfigId = await ensureServer(token, c);
   const channels = await getChannels(token, serverConfigId);
@@ -287,7 +294,7 @@ async function waitBotConnected(token, botId, tries = 30) {
 
 async function link() {
   const c = cfg();
-  const token = await ensureAdmin();
+  const token = await getToken();
   const serverConfigId = await ensureServer(token, c);
   const botId = await ensureBot(token, serverConfigId);
   const stationId = await ensureStation(token, serverConfigId);
@@ -306,7 +313,7 @@ async function link() {
 
 async function unlink() {
   const c = cfg();
-  const token = await ensureAdmin();
+  const token = await getToken();
   const bots = await getBots(token);
   const bot = pickBot(c, bots) || bots[0];
   if (!bot) throw new Error('未找到音乐机器人');
@@ -314,23 +321,37 @@ async function unlink() {
   return { ok: true, botId: bot.id };
 }
 
+// 带 token 失效重试：401 时强制重新登录再试一次
+async function withAuth(fn) {
+  try {
+    return await fn(await getToken());
+  } catch (e) {
+    if (/401/.test(e.message || '')) {
+      invalidateToken();
+      return fn(await getToken());
+    }
+    throw e;
+  }
+}
+
 async function status() {
   const c = cfg();
   let token;
-  try { token = await tryLogin(c.user, c.pass); } catch (e) {
-    try { token = await tryLogin('admin', 'admin'); } catch (e2) { return { enabled: true, connected: false }; }
-  }
+  try { token = await getToken(); } catch (e) { return { enabled: true, connected: false }; }
   try {
-    const bots = await getBots(token);
-    const target = pickBot(c, bots) || bots[0];
-    if (!target) return { enabled: true, connected: false };
-    let bot = target;
-    if (!bot.status) {
-      const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, token);
-      if (status !== 200) return { enabled: true, connected: false };
-      bot = (json.data && json.data.bot) || json.data || json;
-    }
-    return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null };
+    const run = (t) => async () => {
+      const bots = await getBots(t);
+      const target = pickBot(c, bots) || bots[0];
+      if (!target) return { enabled: true, connected: false };
+      let bot = target;
+      if (!bot.status) {
+        const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
+        if (status !== 200) return { enabled: true, connected: false };
+        bot = (json.data && json.data.bot) || json.data || json;
+      }
+      return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null };
+    };
+    return await withAuth(run(token));
   } catch (e) {
     return { enabled: true, connected: false, error: e.message };
   }
