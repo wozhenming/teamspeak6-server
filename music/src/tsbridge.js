@@ -19,7 +19,8 @@ function cfg() {
     pass: config.ts6mgrPass || '',
     botId: config.ts6mgrBotId ? parseInt(config.ts6mgrBotId, 10) : null,
     channel: config.ts6mgrChannel || '',
-    streamUrl: config.streamPublicUrl || 'http://music:3200/api/stream',
+    streamUrl: (config.streamPublicUrl || 'http://music:3200/api/stream'),
+    streamToken: config.streamToken || '',
     tsHost: config.tsHost || '',
     tsWebqueryPort: config.tsWebqueryPort || 10080,
     tsApiKey: config.tsApiKey || '',
@@ -188,13 +189,16 @@ async function listChannels() {
 
 async function ensureStation(token, serverConfigId) {
   const c = cfg();
+  // ts6-manager 的电台 URL 需附上令牌，且必须是“对 ts6-manager 可达且非内网”的地址
+  const sep = c.streamUrl.includes('?') ? '&' : '?';
+  const streamUrl = c.streamToken ? (c.streamUrl + sep + 't=' + encodeURIComponent(c.streamToken)) : c.streamUrl;
   const { status, json } = await authFetch('GET', '/api/servers/' + serverConfigId + '/radio-stations', token);
   const stations = (json.data && json.data.stations) || json.data || json || [];
-  const existing = Array.isArray(stations) ? stations.find((s) => s && s.url === c.streamUrl) : null;
+  const existing = Array.isArray(stations) ? stations.find((s) => s && s.url === streamUrl) : null;
   if (existing) return existing.id;
   const created = await authFetch('POST', '/api/servers/' + serverConfigId + '/radio-stations', token, {
     name: '点歌机器人',
-    url: c.streamUrl,
+    url: streamUrl,
     genre: '点歌',
   });
   if (created.status !== 201 && created.status !== 200) {

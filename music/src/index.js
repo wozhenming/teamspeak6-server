@@ -63,6 +63,10 @@ app.get('/api/img', async (req, res) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.get('/api/stream', async (req, res) => {
+  // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
+  if (config.streamToken && req.query.t !== config.streamToken) {
+    return res.status(403).end('forbidden');
+  }
   res.set('Content-Type', 'audio/mpeg');
   res.set('Cache-Control', 'no-cache');
   res.set('Connection', 'keep-alive');

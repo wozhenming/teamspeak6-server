@@ -109,7 +109,14 @@ services:
       - TS6MGR_PASS=${TS6MGR_PASS:-}
       - TS6MGR_BOT_ID=${TS6MGR_BOT_ID:-}
       - TS6MGR_CHANNEL=${TS6MGR_CHANNEL:-}
-      - STREAM_PUBLIC_URL=http://music:3200/api/stream
+      # 电台音频流对外地址：ts6-manager 的 SSRF 防护会拒绝内网主机名（如 music），
+      # 故必须填“对 ts6-manager 可达且非内网”的地址（通常是服务器公网 IP/域名）。
+      # 例：STREAM_PUBLIC_HOST=8.134.136.98 → http://8.134.136.98:3200/api/stream
+      # 也可直接给完整地址覆盖：STREAM_PUBLIC_URL=http://your.domain:3200/api/stream
+      - STREAM_PUBLIC_URL=${STREAM_PUBLIC_URL:-}
+      - STREAM_PUBLIC_HOST=${STREAM_PUBLIC_HOST:-}
+      - STREAM_TOKEN=${STREAM_TOKEN:-ts6bot}
+      - MUSIC_STREAM_PORT=${MUSIC_STREAM_PORT:-3200}
       # TeamSpeak 连接（自动建连）。TS_API_KEY 与面板共用；如留空则需在 .env 配置。
       - TS_HOST=${TS_HOST:-teamspeak}
       - TS_WEBQUERY_PORT=${TS_WEBQUERY_PORT:-10080}
@@ -118,6 +125,8 @@ services:
       - TS_QUERY_ADMIN_PASSWORD=${TS_QUERY_ADMIN_PASSWORD:-}
     volumes:
       - music-data:/app/data               # 持久化网易云 cookie 与点歌队列
+    ports:
+      - "${MUSIC_STREAM_PORT:-3200}:3200"   # 电台流（ts6-manager 经公网地址拉流；配合 STREAM_TOKEN 防随意收听）
     depends_on:
       neteasemusic:
         condition: service_healthy

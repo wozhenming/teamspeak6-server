@@ -31,8 +31,13 @@ const config = {
   ts6mgrPass: env('TS6MGR_PASS', 'Tsbot123'),
   ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
   ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
-  // ts6-manager 拉取本服务音频流所用的地址（同网络内用 music:3200）
-  streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://music:3200/api/stream'),
+  // ts6-manager 拉取本服务音频流所用的地址。
+  // 注意：ts6-manager 的 SSRF 防护会拒绝解析到内网 IP 的主机名（如 music/teamspeak），
+  // 因此这里必须填“对 ts6-manager 而言可达且非内网”的地址，通常是服务器公网 IP/域名。
+  // 例：STREAM_PUBLIC_HOST=8.134.136.98 → http://8.134.136.98:3200/api/stream
+  streamPublicUrl: env('STREAM_PUBLIC_URL', 'http://' + env('STREAM_PUBLIC_HOST', 'music') + ':3200/api/stream'),
+  // 音频流访问令牌（避免电台流被公网随意收听；ts6-manager 的电台 URL 会带上 ?t=）
+  streamToken: env('STREAM_TOKEN', 'ts6bot'),
   // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，自动建连）
   tsHost: env('TS_HOST', 'teamspeak'),
   tsWebqueryPort: parseInt(env('TS_WEBQUERY_PORT', '10080'), 10),
@@ -51,7 +56,6 @@ function loadTsBridge() {
     if (o.ts6mgrPass) config.ts6mgrPass = o.ts6mgrPass;
     if (o.ts6mgrBotId) config.ts6mgrBotId = o.ts6mgrBotId;
     if (o.ts6mgrChannel) config.ts6mgrChannel = o.ts6mgrChannel;
-    if (o.streamPublicUrl) config.streamPublicUrl = o.streamPublicUrl;
     if (o.tsHost) config.tsHost = o.tsHost;
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
@@ -65,7 +69,6 @@ config.saveTsBridge = (o) => {
     ts6mgrPass: (o.ts6mgrPass || '').trim() || config.ts6mgrPass,
     ts6mgrBotId: (o.ts6mgrBotId || '').trim() || config.ts6mgrBotId,
     ts6mgrChannel: (o.ts6mgrChannel || '').trim() || config.ts6mgrChannel,
-    streamPublicUrl: (o.streamPublicUrl || '').trim() || config.streamPublicUrl,
     tsHost: (o.tsHost || '').trim() || config.tsHost,
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
