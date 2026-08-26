@@ -107,104 +107,144 @@ function probeMedia(input) {
   });
 }
 
-app.get('/api/stream', async (req, res) => {
-  // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
-  if (config.streamToken && req.query.t !== config.streamToken) {
-    return res.status(403).end('forbidden');
+// ================= 常驻电台编码器（全局单例） =================
+// 生命周期：生成机器人(link)/有消费者拉流 时启动；断开(unlink)/空闲60秒 销毁。
+// 单个 ffmpeg 从 stdin 喂 MP3 帧，输出恒定 128k；切歌/seek/暂停只是切换数据源，
+// 进程永不重启 => 无半截帧电音；进度=已喂字节/码率，定期 align 回写播放器时钟。
+const ENC = {
+  running: false,
+  ff: null,
+  listeners: new Set(),   // { res, buf: [], size }
+  idleTimer: null,
+};
+
+function encBroadcast(chunk) {
+  for (const L of ENC.listeners) {
+    if (L.res.writableEnded || L.res.destroyed) continue;
+    if (L.buf.length) { L.buf.push(chunk); L.size += chunk.length; encFlush(L); continue; }
+    if (!L.res.write(chunk)) { L.buf.push(chunk); L.size += chunk.length; }
   }
-  res.set('Content-Type', 'audio/mpeg');
-  res.set('Cache-Control', 'no-cache');
-  res.set('Connection', 'keep-alive');
-  res.set('Transfer-Encoding', 'chunked');
-  res.flushHeaders && res.flushHeaders();
+}
 
-  // ================= 常驻编码器架构 =================
-  // 整个连接只启动一个 ffmpeg（stdin 喂 MP3 帧 -> 恒定 128k 输出）。
-  // 切歌 / seek / 暂停 / 恢复只是切换“喂进来的数据源”，进程永不重启：
-  //   - 帧流连续 => 不再有杀进程导致的半截帧“电音”
-  //   - 进度 = 已喂字节数 / 码率 => 与实际听到的严格一致，定期 align 回写播放器时钟
+function encFlush(L) {
+  while (L.buf.length && !outPausedOf(L)) {
+    const c = L.buf.shift();
+    L.size -= c.length;
+    if (!L.res.write(c)) {
+      L.res.once('drain', () => encFlush(L));
+      break;
+    }
+  }
+  if (L.size > 1024 * 1024) { // 僵尸客户端保护：积压超 1MB 直接断开
+    try { L.res.destroy(); } catch (e) {}
+  }
+}
+
+function outPausedOf(L) { return L.res.writableLength > 0; }
+
+function encDetach(res) {
+  for (const L of ENC.listeners) {
+    if (L.res === res) { ENC.listeners.delete(L); break; }
+  }
+  if (ENC.running && ENC.listeners.size === 0 && !ENC.idleTimer) {
+    ENC.idleTimer = setTimeout(() => {
+      ENC.idleTimer = null;
+      if (ENC.listeners.size === 0) stopEncoder();
+    }, 60 * 1000);
+  }
+}
+
+function stopEncoder() {
+  if (!ENC.running) return;
+  ENC.running = false;
+  if (ENC.idleTimer) { clearTimeout(ENC.idleTimer); ENC.idleTimer = null; }
+  const ff = ENC.ff;
+  ENC.ff = null;
+  try { ff.stdin.end(); } catch (e) {}
+  setTimeout(() => { try { ff.kill('SIGKILL'); } catch (e) {} }, 200);
+  console.log('[encoder] 已停止');
+}
+
+function startEncoder() {
+  if (ENC.running) return;
+  if (ENC.idleTimer) { clearTimeout(ENC.idleTimer); ENC.idleTimer = null; }
+  ENC.running = true;
+
   const { spawn } = require('child_process');
-  let closed = false;
-  req.on('close', () => { closed = true; });
-
   const ff = spawn('ffmpeg', [
     '-hide_banner', '-f', 'mp3', '-i', 'pipe:0',
     '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
     '-f', 'mp3', '-',
   ], { stdio: ['pipe', 'pipe', 'ignore'] });
+  ENC.ff = ff;
+  console.log('[encoder] 已启动');
   ff.on('error', () => {});
+  ff.stdout.on('data', (c) => encBroadcast(c));
   ff.on('close', () => {
-    closed = true;
-    try { if (!res.writableEnded) res.end(); } catch (e) {}
+    if (ENC.ff === ff) {
+      ENC.running = false;
+      ENC.ff = null;
+      console.log('[encoder] 进程退出');
+    }
   });
 
-  let outPaused = false;
-  ff.stdout.on('data', (chunk) => {
-    if (closed) return;
-    outPaused = !res.write(chunk);
-  });
-  res.once('drain', () => { outPaused = false; });
+  const SILENCE_BPS = 4000;
+  const FALLBACK_BPS = 16000;
 
-
-  const SILENCE_BPS = 4000;    // 静音缓冲按 32kbps 折算
-  const FALLBACK_BPS = 16000;  // 未探测到码率时按 128kbps 估算
-
-  // ---------- 上游音频源（支持 Range 续取、内部缓冲） ----------
   function openSource(url, offsetBytes) {
     const ctrl = new AbortController();
     const headers = offsetBytes > 4096 ? { Range: 'bytes=' + offsetBytes + '-' } : {};
     const p = fetch(url, { signal: ctrl.signal, headers });
-    const st = {
-      ctrl, queue: [], qsize: 0, ended: false, failed: false,
+    const stObj = {
+      ctrl, queue: [], qsize: 0, ended: false,
       ns: null, waiters: [],
       notify() { const ws = this.waiters.splice(0); for (const w of ws) w(); },
     };
     p.then((up) => {
-      if (!up.ok || !up.body) { st.failed = true; st.ended = true; st.notify(); return; }
+      if (!up.ok || !up.body) { stObj.failed = true; stObj.ended = true; stObj.notify(); return; }
       const ns = Readable.fromWeb(up.body);
-      st.ns = ns;
+      stObj.ns = ns;
       ns.on('data', (c) => {
-        st.queue.push(c); st.qsize += c.length;
-        if (st.qsize > 512 * 1024 && !ns.isPaused()) ns.pause();
-        st.notify();
+        stObj.queue.push(c); stObj.qsize += c.length;
+        if (stObj.qsize > 512 * 1024 && !ns.isPaused()) ns.pause();
+        stObj.notify();
       });
-      ns.on('end', () => { st.ended = true; st.notify(); });
-      ns.on('error', () => { st.failed = true; st.ended = true; st.notify(); });
-    }).catch(() => { st.failed = true; st.ended = true; st.notify(); });
-    return st;
+      ns.on('end', () => { stObj.ended = true; stObj.notify(); });
+      ns.on('error', () => { stObj.ended = true; stObj.notify(); });
+    }).catch(() => { stObj.ended = true; stObj.notify(); });
+    return stObj;
   }
 
-  function pumpSource(st) {
-    if (st && st.ns && st.isPaused !== false && st.qsize < 256 * 1024 && st.ns.isPaused()) st.ns.resume();
+  function pumpSrc(stObj) {
+    if (stObj && stObj.ns && stObj.qsize < 256 * 1024 && stObj.ns.isPaused()) stObj.ns.resume();
   }
 
-  async function readSource(st) {
-    if (!st) return null;
-    while (true) {
-      if (st.queue.length) {
-        const c = st.queue.shift();
-        st.qsize -= c.length;
-        pumpSource(st);
+  async function readSource(stObj) {
+    if (!stObj) return null;
+    for (;;) {
+      if (stObj.queue.length) {
+        const c = stObj.queue.shift();
+        stObj.qsize -= c.length;
+        pumpSrc(stObj);
         return c;
       }
-      if (st.ended) return null;
-      await Promise.race([new Promise((r) => st.waiters.push(r)), sleep(60)]);
+      if (stObj.ended) return null;
+      await Promise.race([new Promise((r) => stObj.waiters.push(r)), sleep(60)]);
     }
   }
 
-  function stopSource(st) { try { if (st && st.ctrl) st.ctrl.abort(); } catch (e) {} }
+  function stopSource(stObj) { try { if (stObj && stObj.ctrl) stObj.ctrl.abort(); } catch (e) {} }
 
   async function writeStdin(buf) {
-    if (closed || ff.stdin.destroyed) return false;
+    if (!ENC.running || ff.stdin.destroyed) return;
     ff.stdin.write(buf);
-    return true;
   }
 
   async function feedSilence(ms) {
-    if (!SILENCE_BUF || closed) return;
+    if (!SILENCE_BUF) return;
     let need = Math.ceil(SILENCE_BPS * ms / 1000);
     let pos = silencePos;
-    while (need > 0 && !closed && !ff.stdin.destroyed) {
+    while (need > 0 && ENC.running && !ff.stdin.destroyed) {
       if (pos >= SILENCE_BUF.length) pos = 0;
       const n = Math.min(1024, SILENCE_BUF.length - pos, need);
       await writeStdin(SILENCE_BUF.subarray(pos, pos + n));
@@ -213,51 +253,63 @@ app.get('/api/stream', async (req, res) => {
     silencePos = pos % SILENCE_BUF.length;
   }
 
-  // ---------- 导播主循环 ----------
-  let srcBps = FALLBACK_BPS;          // 当前歌曲“字节/秒”
-  let songPos = 0;                    // 当前歌真实已播秒数（由喂入字节换算）
+  let srcBps = FALLBACK_BPS;
+  let songPos = 0;
   let curKey = null;
   let src = null;
   let lastTick = Date.now();
   let lastAlignAt = 0;
-  let silencePos = 0;
   let failCount = 0;
 
   (async () => {
     let mode = 'silence';
     let accBytes = 0;
+    let silencePosLocal = 0;
 
-    while (!closed) {
+    while (ENC.running) {
       const now = Date.now();
       const dt = Math.min(0.5, (now - lastTick) / 1000);
       lastTick = now;
-      if (outPaused) { await sleep(40); continue; }
 
       const st = player.get();
       const wantSong = !!(st.current && st.playing);
 
-      // ---- 空闲 / 暂停：静音 ----
       if (!wantSong) {
         if (mode !== 'silence') { mode = 'silence'; stopSource(src); src = null; accBytes = 0; }
-        await feedSilence(Math.floor(dt * 1000));
+        if (SILENCE_BUF) {
+          let need = Math.ceil(SILENCE_BPS * dt);
+          while (need > 0 && ENC.running) {
+            if (silencePosLocal >= SILENCE_BUF.length) silencePosLocal = 0;
+            const n = Math.min(1024, SILENCE_BUF.length - silencePosLocal, need);
+            await writeStdin(SILENCE_BUF.subarray(silencePosLocal, silencePosLocal + n));
+            silencePosLocal += n; need -= n;
+          }
+        }
         await sleep(30);
         continue;
       }
 
-      // ---- 有歌且在播 ----
       const cur = st.current;
       if (cur.id !== curKey || mode === 'silence') {
-        // 新歌 / 从暂停恢复：重置位置与源
         curKey = cur.id;
         songPos = Math.max(0, Math.floor(st.position) || 0);
         stopSource(src); src = null;
         mode = 'song';
         accBytes = 0;
-        await feedSilence(120); // 内容切换边界垫片
-        if (closed) break;
+        if (SILENCE_BUF) {
+          let pad = Math.ceil(SILENCE_BPS * 120 / 1000);
+          let p2 = silencePosLocal;
+          while (pad > 0 && ENC.running) {
+            if (p2 >= SILENCE_BUF.length) p2 = 0;
+            const n = Math.min(pad, SILENCE_BUF.length - p2);
+            await writeStdin(SILENCE_BUF.subarray(p2, p2 + n));
+            p2 += n; pad -= n;
+          }
+          silencePosLocal = p2 % SILENCE_BUF.length;
+        }
+        if (!ENC.running) break;
       }
 
-      // 解析网易云 ID 与直链（缓存 / 解灰兜底）
       let neteaseId = cur.songId || songIdCache[curKey] || null;
       if (!neteaseId) {
         try {
@@ -291,7 +343,7 @@ app.get('/api/stream', async (req, res) => {
             new Promise((_r, rej) => setTimeout(() => rej(new Error('解灰超时')), 10000)),
           ]);
           audioUrl = (m && m.url) || '';
-          if (audioUrl) console.log('[stream] 已解灰播放 id=' + neteaseId + ' title=' + (cur.title || '?'));
+          if (audioUrl) console.log('[stream] 已解灰播放 id=' + neteaseId);
         } catch (e) { audioUrl = ''; }
       }
       if (neteaseId && audioUrl) urlCache.set(neteaseId, Object.assign({}, urlCache.get(neteaseId), { url: audioUrl, at: Date.now(), type: audioType }));
@@ -313,7 +365,6 @@ app.get('/api/stream', async (req, res) => {
       }
       failCount = 0;
 
-      // 非 MP3 容器跳过（stdin 是 mp3 解复用，AAC/M4A 会成噪声）
       if (audioType && !/mp3/i.test(audioType)) {
         console.log('[stream] 非 MP3 音源跳过 type=' + audioType + ' id=' + neteaseId);
         player.next();
@@ -321,7 +372,6 @@ app.get('/api/stream', async (req, res) => {
         continue;
       }
 
-      // 确保上游源存在
       if (!src && audioUrl) {
         const input = config.imgProxy
           ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
@@ -347,40 +397,55 @@ app.get('/api/stream', async (req, res) => {
         }
       }
 
-      // seek 检测：UI 目标与实际喂入位置差 >2s 时，Range 重取实现无缝跳转（进程不重启）
       const uiTarget = Math.floor(player.get().position);
       if (Math.abs(uiTarget - songPos) > 2) {
         stopSource(src); src = null; accBytes = 0;
         songPos = uiTarget;
-        await feedSilence(120);
+        if (SILENCE_BUF) {
+          let pad = Math.ceil(SILENCE_BPS * 120 / 1000);
+          let p3 = silencePosLocal;
+          while (pad > 0 && ENC.running) {
+            if (p3 >= SILENCE_BUF.length) p3 = 0;
+            const n = Math.min(pad, SILENCE_BUF.length - p3);
+            await writeStdin(SILENCE_BUF.subarray(p3, p3 + n));
+            p3 += n; pad -= n;
+          }
+          silencePosLocal = p3 % SILENCE_BUF.length;
+        }
       }
 
-      // 按实时速率预算喂入
       accBytes += dt * srcBps;
       accBytes = Math.min(accBytes, srcBps * 2);
-      let fedAny = false, upstreamDone = false;
-      while (accBytes >= 1024 && !closed) {
+      let upstreamDone = false;
+      while (accBytes >= 1024 && ENC.running) {
         if (!src) break;
         const chunk = await readSource(src);
         if (chunk === null) {
           if (src.ended) { upstreamDone = true; break; }
-          break; // 数据未到，下轮再试
+          break;
         }
         songPos += chunk.length / srcBps;
         await writeStdin(chunk);
         accBytes -= chunk.length;
-        fedAny = true;
-        if (outPaused) break;
       }
 
       if (upstreamDone) {
         stopSource(src); src = null;
-        await feedSilence(250); // 歌间短静音
+        if (SILENCE_BUF) {
+          let pad = Math.ceil(SILENCE_BPS * 250 / 1000);
+          let p4 = silencePosLocal;
+          while (pad > 0 && ENC.running) {
+            if (p4 >= SILENCE_BUF.length) p4 = 0;
+            const n = Math.min(pad, SILENCE_BUF.length - p4);
+            await writeStdin(SILENCE_BUF.subarray(p4, p4 + n));
+            p4 += n; pad -= n;
+          }
+          silencePosLocal = p4 % SILENCE_BUF.length;
+        }
         const sNow = player.get();
         if (sNow.current && sNow.current.id === curKey && sNow.playing) player.next();
       }
 
-      // 定期把真实进度回写播放器时钟（UI 进度条与声音严格同步）
       if (now - lastAlignAt > 2000 && curKey != null) {
         lastAlignAt = now;
         try { player.align(songPos); } catch (e) {}
@@ -388,13 +453,28 @@ app.get('/api/stream', async (req, res) => {
 
       await sleep(30);
     }
-    try { ff.stdin.end(); } catch (e) {}
-    setTimeout(() => { try { ff.kill('SIGKILL'); } catch (e) {} }, 300);
   })().catch((e) => {
-    console.log('[stream] 泵异常:', e.message);
-    try { ff.stdin.end(); } catch (e2) {}
-    try { ff.kill('SIGKILL'); } catch (e2) {}
+    console.log('[encoder] 导播异常:', e.message);
+    stopEncoder();
   });
+}
+
+app.get('/api/stream', async (req, res) => {
+  // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
+  if (config.streamToken && req.query.t !== config.streamToken) {
+    return res.status(403).end('forbidden');
+  }
+  res.set('Content-Type', 'audio/mpeg');
+  res.set('Cache-Control', 'no-cache');
+  res.set('Connection', 'keep-alive');
+  res.set('Transfer-Encoding', 'chunked');
+  res.flushHeaders && res.flushHeaders();
+
+  // 有消费者拉流 => 确保编码器运行（幂等）
+  startEncoder();
+  const L = { res, buf: [], size: 0 };
+  ENC.listeners.add(L);
+  res.on('close', () => encDetach(res));
 });
 
 // ---------- ts6-manager 对接（点歌机器人进入 TeamSpeak） ----------
@@ -418,10 +498,18 @@ app.put('/api/ts-bot/config', (req, res) => {
   try { ok(res, config.saveTsBridge(req.body || {})); } catch (e) { fail(res, 500, 'CFG_FAIL', e.message); }
 });
 app.post('/api/ts-bot/link', async (req, res) => {
-  try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
+  try {
+    const r = await tsbridge.link();
+    startEncoder(); // 生成机器人 => 启动常驻编码器
+    ok(res, r);
+  } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
 });
 app.post('/api/ts-bot/unlink', async (req, res) => {
-  try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
+  try {
+    const r = await tsbridge.unlink();
+    stopEncoder(); // 断开连接 => 销毁编码器，释放资源
+    ok(res, r);
+  } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
 app.get('/api/ts-bot/channels', async (req, res) => {
   try { ok(res, await tsbridge.listChannels()); } catch (e) { fail(res, 400, 'TS_CHANNELS_FAIL', e.message); }
