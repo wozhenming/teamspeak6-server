@@ -88,7 +88,16 @@ async function ensureServer(token, c) {
   const apiKey = await resolveApiKey();
   const list = await getServers(token);
   const existing = list.find((s) => s && (s.host === c.tsHost || (c.tsHost && s.host && s.host.includes(c.tsHost))));
-  if (existing) return existing.id;
+  if (existing) {
+    // 始终用最新 Key 刷新连接配置，避免首次用错 Key 后一直沿用旧的导致 502
+    await authFetch('PUT', '/api/servers/' + existing.id, token, {
+      name: existing.name || 'TeamSpeak',
+      host: c.tsHost,
+      webqueryPort: c.tsWebqueryPort,
+      apiKey,
+    });
+    return existing.id;
+  }
   const created = await authFetch('POST', '/api/servers', token, {
     name: 'TeamSpeak',
     host: c.tsHost,
