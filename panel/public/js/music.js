@@ -66,16 +66,22 @@ TSPages.music = async function () {
         </span>
       </h3>
       <div id="ts-status" class="muted" style="font-size:12.5px">未连接</div>
-      <div style="display:flex;flex-direction:column;gap:3px;margin-top:10px">
-        <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
-        <div style="display:flex;gap:8px">
-          <select id="ts-channel" class="select" style="flex:1">
-            <option value="">（加载频道中…）</option>
-          </select>
-          <button class="btn btn-sm" id="btn-ts-refresh" title="刷新频道列表">↻</button>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
+          <div style="display:flex;gap:8px">
+            <select id="ts-channel" class="select" style="flex:1">
+              <option value="">（加载频道中…）</option>
+            </select>
+            <button class="btn btn-sm" id="btn-ts-refresh" title="刷新频道列表">↻</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <span class="muted" style="font-size:12px">TeamSpeak WebQuery API Key</span>
+          <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
       </div>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">ts6-manager 与 TeamSpeak 连接已自动配置；选好频道后点“连接到频道”。</div>
+      <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
     </div>
 
     <div class="card">
@@ -403,14 +409,16 @@ TSPages.music = async function () {
   $('btn-ts-link').onclick = async () => {
     try {
       const ch = $('ts-channel').value.trim();
+      const key = $('ts-key').value.trim();
       if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
-      TSUtils.toast('正在连接 TeamSpeak…', 'success');
-      // 先保存频道，再连接（其余配置由后端自动套用默认值）
-      await API.musicTsSaveConfig({ ts6mgrChannel: ch });
+      if (!key) { TSUtils.toast('请先填写 TS API Key', 'error'); return; }
+      TSUtils.toast('正在生成机器人并连接 TeamSpeak…', 'success');
+      // 保存频道与 Key，再自动建连（后端自动创建管理员/TS 连接/机器人并推流）
+      await API.musicTsSaveConfig({ ts6mgrChannel: ch, tsApiKey: key });
       const r = await API.musicTsLink();
       TSUtils.toast('已连接：bot #' + r.botId, 'success');
       refreshTsStatus();
-    } catch (e) { TSUtils.toast('连接失败：' + e.message, 'error'); }
+    } catch (e) { TSUtils.toast('生成失败：' + e.message, 'error'); }
   };
   $('btn-ts-unlink').onclick = async () => {
     try { await API.musicTsUnlink(); TSUtils.toast('已断开推流', 'success'); refreshTsStatus(); }
@@ -419,8 +427,10 @@ TSPages.music = async function () {
   async function loadTsChannels() {
     const sel = $('ts-channel');
     try {
+      const cfg = await API.musicTsConfig();
       const channels = await API.musicTsChannels();
-      const saved = (await API.musicTsConfig()).ts6mgrChannel || '';
+      const saved = cfg.ts6mgrChannel || '';
+      $('ts-key').value = cfg.tsApiKey || '';
       sel.innerHTML = '';
       if (!channels.length) {
         sel.innerHTML = '<option value="">（无频道，请先在 TS 创建）</option>';
