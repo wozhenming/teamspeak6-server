@@ -36,11 +36,16 @@ function num(v, fallback) {
 router.get('/status', async (req, res, next) => {
   try {
     const containerName = req.query.name || config.tsContainerName;
+    // TS6 /version 返回数组 [{build,platform,version}]，取第一项的 version 字符串
+    const pickVersion = (v) => {
+      const item = Array.isArray(v) ? v[0] : v;
+      return (item && typeof item === 'object' ? item.version : item) || '';
+    };
     const [env, container, composeFile, wq] = await Promise.all([
       isContainerMode() ? dockerApi.detect() : docker.detectDocker(),
       isContainerMode() ? dockerApi.containerStatus(containerName) : docker.containerStatus(containerName),
       docker.composeFilePath(),
-      ts.version().then((v) => ({ reachable: true, version: v.version || v })).catch((e) => ({ reachable: false, error: e.message })),
+      ts.version().then((v) => ({ reachable: true, version: pickVersion(v) })).catch((e) => ({ reachable: false, error: e.message })),
     ]);
 
     let composeContent = null;

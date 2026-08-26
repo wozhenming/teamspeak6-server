@@ -218,8 +218,9 @@ function prev() { step(-1, state.loopMode !== 'off'); return get(); }
 
 function setLoop(mode) {
   if (!LOOP_MODES.includes(mode)) return get();
-  if (state.loopMode !== mode) { state.loopMode = mode; rev++; }
-  save();
+  // 注意：循环模式只影响“播完后的切歌方式”，不改变当前出声，
+  // 因此这里绝不能 bump rev（否则电台流会被无谓重启，产生电音毛刺）
+  if (state.loopMode !== mode) { state.loopMode = mode; save(); }
   return get();
 }
 
