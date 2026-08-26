@@ -62,6 +62,8 @@ app.get('/api/img', async (req, res) => {
 // 一曲结束后自动下一首；用户在面板切歌/暂停时本流自动跟随。
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const songIdCache = {}; // 队列条目内部 id -> 网易云歌曲 id（旧数据自愈用）
+const urlCache = new Map(); // 网易云歌曲 id -> { url, at }（直链缓存，避免 seek/恢复时反复请求）
+const URL_TTL = 8 * 60 * 1000;
 
 app.get('/api/stream', async (req, res) => {
   // 简单令牌校验：若配置了 STREAM_TOKEN，则电台 URL 必须带 ?t= 且匹配，避免公网被随意收听
@@ -79,16 +81,26 @@ app.get('/api/stream', async (req, res) => {
   req.on('close', () => { closed = true; });
 
   const pipeFf = (ff, isDone) => new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(iv);
+      try { ff.kill('SIGKILL'); } catch (e) {}
+      resolve();
+    };
+    // 状态变化（seek/暂停/切歌）时必须真正终止当前转码进程，否则 pump 会卡死
+    const iv = setInterval(() => { if (isDone()) finish(); }, 300);
     ff.stdout.on('data', (chunk) => {
-      if (isDone()) return;
+      if (isDone()) return finish();
       if (!res.write(chunk)) {
         ff.stdout.pause();
         res.once('drain', () => { if (!isDone()) ff.stdout.resume(); });
       }
     });
-    ff.on('error', () => resolve());
-    ff.on('close', () => resolve());
-    req.on('close', () => { try { ff.kill('SIGKILL'); } catch (e) {} resolve(); });
+    ff.on('error', () => finish());
+    ff.on('close', () => finish());
+    req.on('close', () => finish());
   });
 
   // 空闲时持续推送静音，保证电台流永不断流（否则机器人解码器会停摆/放弃，之后有歌也没声音）
@@ -134,13 +146,18 @@ app.get('/api/stream', async (req, res) => {
 
       let audioUrl = '';
       if (neteaseId) {
-        try {
-          const r = await Promise.race([
-            enhanced.songUrl(neteaseId),
-            new Promise((_r, rej) => setTimeout(() => rej(new Error('songUrl 超时')), 8000)),
-          ]);
-          audioUrl = (r && r.url) || '';
-        } catch (e) { audioUrl = ''; }
+        const cached = urlCache.get(neteaseId);
+        if (cached && cached.url && Date.now() - cached.at < URL_TTL) {
+          audioUrl = cached.url;
+        } else {
+          try {
+            const r = await Promise.race([
+              enhanced.songUrl(neteaseId),
+              new Promise((_r, rej) => setTimeout(() => rej(new Error('songUrl 超时')), 8000)),
+            ]);
+            audioUrl = (r && r.url) || '';
+          } catch (e) { audioUrl = ''; }
+        }
       }
       // 灰色/无版权歌曲：走 UnblockNeteaseMusic 解灰兜底
       if (!audioUrl && neteaseId) {
@@ -153,6 +170,7 @@ app.get('/api/stream', async (req, res) => {
           if (audioUrl) console.log('[stream] 已解灰播放 id=' + neteaseId + ' title=' + (cur.title || '?'));
         } catch (e) { audioUrl = ''; }
       }
+      if (audioUrl) urlCache.set(neteaseId, { url: audioUrl, at: Date.now() });
       if (!audioUrl) {
         failCount++;
         // 顺手查一下不可播原因（仅日志用，失败不影响流程）
@@ -176,31 +194,34 @@ app.get('/api/stream', async (req, res) => {
         ? config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(audioUrl)
         : audioUrl;
 
-      // 用 ffmpeg 转码为稳定 MP3 流（-re 按原速推送，避免被电台客户端当成文件缓存满后回跳）
-      const ff = spawn('ffmpeg', [
-        '-re',
-        '-protocol_whitelist', 'file,http,https,tcp,pipe',
-        '-i', input,
-        '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
-        '-f', 'mp3', '-',
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      // 从当前进度起播（seek/恢复播放时 >0），-ss 走输入端快速跳转
+      const startPos = Math.max(0, Math.floor(player.get().position) || 0);
+      const ffArgs = ['-re', '-protocol_whitelist', 'file,http,https,tcp,pipe'];
+      if (startPos > 0) ffArgs.push('-ss', String(startPos));
+      ffArgs.push('-i', input, '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', '-f', 'mp3', '-');
+      const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+      const revAtStart = player.get().rev;
       let errTail = '';
       ff.stderr.on('data', (d) => { if (errTail.length < 2000) errTail += d.toString(); });
       ff.on('close', (code) => {
         const nowCur = player.get().current;
-        const skipped = closed || !nowCur || nowCur.id !== curKey;
-        if (!skipped && code !== 0) console.log('[stream] ffmpeg 提前退出 code=' + code + ' | ' + errTail.slice(-300));
+        const interrupted = closed || !nowCur || nowCur.id !== curKey || player.get().rev !== revAtStart;
+        if (!interrupted && code !== 0) console.log('[stream] ffmpeg 提前退出 code=' + code + ' | ' + errTail.slice(-300));
       });
 
       await pipeFf(ff, () => {
-        const nowCur = player.get().current;
-        return closed || !nowCur || nowCur.id !== curKey;
+        const s = player.get();
+        return closed || !s.current || s.current.id !== curKey || s.rev !== revAtStart;
       });
 
       if (closed) break;
-      // 自然播放结束 -> 前进
-      if (player.get().current && player.get().current.id === curKey) player.next();
-      await sleep(200);
+      const sNow = player.get();
+      if (sNow.rev === revAtStart && sNow.current && sNow.current.id === curKey && sNow.playing) {
+        // 期间无任何手动操作且曲子真的放完 -> 自然前进
+        player.next();
+      }
+      // 其余情况（seek/暂停/切歌等）回到循环顶部按最新状态重新拉流
+      await sleep(150);
     }
     if (!res.writableEnded) res.end();
   };

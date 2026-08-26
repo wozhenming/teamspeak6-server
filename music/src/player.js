@@ -24,6 +24,10 @@ let state = {
   loopMode: 'all',
 };
 
+// 状态版本号：任何会影响实际出声的操作(播放/暂停/切歌/seek/循环)都自增，
+// 电台流据此感知变化并重启转码进程（如带 -ss 跳转）
+let rev = 0;
+
 function load() {
   try {
     if (!fs.existsSync(stateFile)) return;
@@ -78,6 +82,7 @@ function playItem(id) {
   state.basePosition = 0;
   state.updatedAt = Date.now();
   state.playing = !!item;
+  rev++;
   save();
   return currentItem();
 }
@@ -87,6 +92,7 @@ function stopInternal() {
   state.basePosition = 0;
   state.updatedAt = Date.now();
   state.playing = false;
+  rev++;
   save();
 }
 
@@ -145,6 +151,7 @@ function get() {
     playing: !!state.playing && !!currentItem(),
     loopMode: state.loopMode,
     queueLength: queue.all().length,
+    rev,
   };
 }
 
@@ -159,6 +166,7 @@ function play(id) {
   if (!state.playing) {
     state.updatedAt = Date.now();
     state.playing = true;
+    rev++;
     save();
   }
   return get();
@@ -169,6 +177,7 @@ function pause() {
   state.basePosition = positionSec();
   state.playing = false;
   state.updatedAt = Date.now();
+  rev++;
   save();
   return get();
 }
@@ -179,6 +188,7 @@ function resume() {
   state.basePosition = positionSec();
   state.updatedAt = Date.now();
   state.playing = true;
+  rev++;
   save();
   return get();
 }
@@ -197,6 +207,7 @@ function seek(sec) {
   if (pos < 0) pos = 0;
   state.basePosition = pos;
   state.updatedAt = Date.now();
+  rev++;
   save();
   return get();
 }
@@ -207,7 +218,7 @@ function prev() { step(-1, state.loopMode !== 'off'); return get(); }
 
 function setLoop(mode) {
   if (!LOOP_MODES.includes(mode)) return get();
-  state.loopMode = mode;
+  if (state.loopMode !== mode) { state.loopMode = mode; rev++; }
   save();
   return get();
 }
@@ -224,6 +235,7 @@ function onQueueChanged(removedId) {
   else {
     state.currentId = Number(fallback.id);
     state.basePosition = 0;
+    rev++;
     save();
   }
 }
