@@ -96,8 +96,7 @@ async function ensureServer(token, c) {
     apiKey,
   });
   if (created.status !== 201 && created.status !== 200) {
-    const msg = (created.json && (created.json.error && created.json.error.message)) || ('HTTP ' + created.status);
-    throw new Error('自动创建 TS 连接失败（' + msg + '）；请确认 TS_API_KEY 正确');
+    throw new Error(apiErrText(created.status, created.json, '自动创建 TS 连接失败') + '；请确认 TS_API_KEY 正确');
   }
   const s = (created.json && (created.json.data || created.json));
   return s.id;
@@ -107,6 +106,19 @@ async function getBots(token) {
   const { status, json } = await authFetch('GET', '/api/music-bots', token);
   if (status !== 200) throw new Error('获取音乐机器人列表失败 (HTTP ' + status + ')');
   return (json.data && json.data.bots) || json.data || json || [];
+}
+
+// 提取 ts6-manager 返回的详细错误（含 TeamSpeak 原始 status 信息），便于排查
+function apiErrText(status, json, fallback) {
+  let s = fallback + ' (HTTP ' + status + ')';
+  if (json) {
+    const msg = (json.error && (json.error.message || (typeof json.error === 'string' ? json.error : null)))
+      || json.message || json.details || (json.error && json.error.details);
+    const code = json.code || (json.error && json.error.code);
+    if (msg) s += ' — ' + msg;
+    if (code != null) s += ' [code ' + code + ']';
+  }
+  return s;
 }
 
 // WebQuery 响应可能是数组 / {data:[...]} / 单对象，这里统一成数组
@@ -122,7 +134,7 @@ function toArray(json) {
 // 取第一个虚拟服务器 id（TS 通常为 1）
 async function getVirtualServerId(token, configId) {
   const { status, json } = await authFetch('GET', '/api/servers/' + configId + '/virtual-servers', token);
-  if (status !== 200) throw new Error('获取虚拟服务器列表失败 (HTTP ' + status + ')');
+  if (status !== 200) throw new Error(apiErrText(status, json, '获取虚拟服务器列表失败'));
   const list = toArray(json);
   const first = list[0] || {};
   const sid = first.virtualserver_id || first.sid || first.id || 1;
@@ -133,7 +145,7 @@ async function getVirtualServerId(token, configId) {
 async function getChannels(token, configId) {
   const sid = await getVirtualServerId(token, configId);
   const { status, json } = await authFetch('GET', '/api/servers/' + configId + '/vs/' + sid + '/channels', token);
-  if (status !== 200) throw new Error('获取频道列表失败 (HTTP ' + status + ')');
+  if (status !== 200) throw new Error(apiErrText(status, json, '获取频道列表失败'));
   // channellist 字段用 cid/pid/channel_name
   const list = toArray(json);
   const norm = list.map((ch) => {
@@ -177,7 +189,7 @@ async function ensureStation(token, serverConfigId) {
     genre: '点歌',
   });
   if (created.status !== 201 && created.status !== 200) {
-    throw new Error('创建电台失败 (HTTP ' + created.status + ')');
+    throw new Error(apiErrText(created.status, created.json, '创建电台失败'));
   }
   const st = (created.json && (created.json.data || created.json));
   return st.id;
@@ -204,7 +216,7 @@ async function ensureBot(token, serverConfigId) {
     autoStart: true,
   });
   if (create.status !== 201 && create.status !== 200) {
-    throw new Error('创建音乐机器人失败 (HTTP ' + create.status + ')');
+    throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败'));
   }
   const bot = (create.json && (create.json.data || create.json));
   return bot.id;
@@ -238,8 +250,7 @@ async function link() {
   await waitBotConnected(token, botId);
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
   if (play.status !== 200) {
-    const msg = (play.json && (play.json.error && play.json.error.message)) || ('HTTP ' + play.status);
-    throw new Error('播放电台失败（' + msg + '）');
+    throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
   }
   // 持久化 botId，避免重复连接时反复新建机器人
   try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: c.channel }); } catch (e) { /* 忽略 */ }
