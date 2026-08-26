@@ -238,12 +238,23 @@ async function bootstrap() {
     // clientlist 单行时可能是对象，统一成数组
     const rawItems = Array.isArray(list) ? list : [list];
     const items = rawItems.filter(Boolean);
-    const bot = items.find((x) => x.client_nickname === '点歌机器人')
-      || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
-    let botCid = bot ? bot.cid : null;
+    // 1) 优先按已配置的点歌频道名定位；2) 其次按机器人昵称；3) 兜底第一个语音用户频道
+    const wantName = (config.ts6mgrChannel || '').trim();
+    const channelList = await cmd('channellist');
+    const chItems = Array.isArray(channelList) ? channelList : [channelList];
+    let botCid = null;
+    if (wantName) {
+      const ch = chItems.find((x) => (x.channel_name || '') === wantName);
+      if (ch) botCid = ch.cid;
+    }
+    if (!botCid) {
+      const bot = items.find((x) => x.client_nickname === '点歌机器人')
+        || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+      if (bot) botCid = bot.cid;
+    }
     if (!botCid) {
       const voice = items.find((x) => String(x.client_type) !== '1');
-      if (voice && String(voice.cid) !== String(myCid)) botCid = voice.cid;
+      if (voice && String(voice.cid) !== String(myCid) && voice.cid != null) botCid = voice.cid;
     }
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
