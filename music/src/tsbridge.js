@@ -84,31 +84,52 @@ async function getServers(token) {
   return list;
 }
 
-// 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建
+// 连接参数指纹（host/port/keyHash），用于判断是否真的需要更新 ts6-manager
+function connFingerprint(apiKey, c) {
+  const crypto = require('crypto');
+  return {
+    host: String(c.tsHost || ''),
+    port: Number(c.tsWebqueryPort || 0),
+    keyHash: apiKey ? crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 32) : '',
+  };
+}
+
+// 确保 ts6-manager 里已存在指向本 TS 服务器的连接；没有则自动创建。
+// 注意：配置未变化时绝不重复 PUT —— 每次 PUT 都会让 ts6-manager 重连其查询客户端，
+// 面板每次进入点歌页都会拉频道列表，频繁重连会造成音乐机器人音频抖动（电音）。
 async function ensureServer(token, c) {
   const apiKey = await resolveApiKey();
+  const want = connFingerprint(apiKey, c);
   const list = await getServers(token);
-  const existing = list.find((s) => s && (s.host === c.tsHost || (c.tsHost && s.host && s.host.includes(c.tsHost))));
+  const existing = list.find((s) => s && (s.host === want.host || (want.host && s.host && s.host.includes(want.host))));
   if (existing) {
-    // 始终用最新 Key 刷新连接配置，避免首次用错 Key 后一直沿用旧的导致 502
+    const unchanged =
+      Number(existing.webqueryPort) === want.port &&
+      config.appliedHost === want.host &&
+      Number(config.appliedPort) === want.port &&
+      config.appliedKeyHash === want.keyHash;
+    if (unchanged) return existing.id;
+    // 有实际变化才刷新（如更换了 API Key / 主机 / 端口）
     await authFetch('PUT', '/api/servers/' + existing.id, token, {
       name: existing.name || 'TeamSpeak',
-      host: c.tsHost,
-      webqueryPort: c.tsWebqueryPort,
+      host: want.host,
+      webqueryPort: want.port,
       apiKey,
     });
+    try { config.saveTsBridge({ appliedHost: want.host, appliedPort: String(want.port), appliedKeyHash: want.keyHash }); } catch (e) {}
     return existing.id;
   }
   const created = await authFetch('POST', '/api/servers', token, {
     name: 'TeamSpeak',
-    host: c.tsHost,
-    webqueryPort: c.tsWebqueryPort,
+    host: want.host,
+    webqueryPort: want.port,
     apiKey,
   });
   if (created.status !== 201 && created.status !== 200) {
     throw new Error(apiErrText(created.status, created.json, '自动创建 TS 连接失败') + '；请确认 TS_API_KEY 正确');
   }
   const s = (created.json && (created.json.data || created.json));
+  try { config.saveTsBridge({ appliedHost: want.host, appliedPort: String(want.port), appliedKeyHash: want.keyHash }); } catch (e) {}
   return s.id;
 }
 

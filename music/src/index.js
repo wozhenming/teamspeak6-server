@@ -120,7 +120,7 @@ app.get('/api/stream', async (req, res) => {
       resolve();
     };
     // 状态变化（seek/暂停/切歌）时必须真正终止当前转码进程，否则 pump 会卡死
-    const iv = setInterval(() => { if (isDone()) finish(); }, 300);
+    const iv = setInterval(() => { if (isDone()) finish(); }, 120);
     ff.stdout.on('data', (chunk) => {
       if (isDone()) return finish();
       if (!res.write(chunk)) {
