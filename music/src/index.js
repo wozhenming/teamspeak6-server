@@ -9,6 +9,7 @@ const enhanced = require('./enhanced');
 const queue = require('./queue');
 const player = require('./player');
 const tsbridge = require('./tsbridge');
+const tschat = require('./tschat');
 
 const app = express();
 app.disable('x-powered-by');
@@ -613,6 +614,7 @@ Promise.all([
   resolveStreamPublicUrl(),
   generateSilence().then((b) => { SILENCE_BUF = b; if (!b) console.log('[music-bot] 静音缓冲生成失败，暂停过渡将无垫片'); }),
 ]).then(() => {
+  tschat.start(); // TS 频道聊天点歌监听（需 TS_QUERY_ADMIN_PASSWORD）
   const server = app.listen(config.port, config.host, () => {
     console.log(`[music-bot] 点歌服务已启动 ${config.host}:${config.port}`);
     console.log(`[music-bot] 网易云 API: ${config.apiBase}`);
