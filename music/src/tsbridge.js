@@ -109,18 +109,37 @@ async function getBots(token) {
   return (json.data && json.data.bots) || json.data || json || [];
 }
 
+// WebQuery 响应可能是数组 / {data:[...]} / 单对象，这里统一成数组
+function toArray(json) {
+  if (Array.isArray(json)) return json;
+  if (json && Array.isArray(json.data)) return json.data;
+  if (json && Array.isArray(json.channels)) return json.channels;
+  if (json && json.data && Array.isArray(json.data.channels)) return json.data.channels;
+  if (json && json.cid != null) return [json];
+  return [];
+}
+
+// 取第一个虚拟服务器 id（TS 通常为 1）
+async function getVirtualServerId(token, configId) {
+  const { status, json } = await authFetch('GET', '/api/servers/' + configId + '/virtual-servers', token);
+  if (status !== 200) throw new Error('获取虚拟服务器列表失败 (HTTP ' + status + ')');
+  const list = toArray(json);
+  const first = list[0] || {};
+  const sid = first.virtualserver_id || first.sid || first.id || 1;
+  return parseInt(sid, 10) || 1;
+}
+
 // 列出 TS 服务器现有频道（供面板下拉选择）。自动确保 TS 连接已建立。
-async function getChannels(token, serverConfigId) {
-  const { status, json } = await authFetch('GET', '/api/servers/' + serverConfigId + '/channels', token);
+async function getChannels(token, configId) {
+  const sid = await getVirtualServerId(token, configId);
+  const { status, json } = await authFetch('GET', '/api/servers/' + configId + '/vs/' + sid + '/channels', token);
   if (status !== 200) throw new Error('获取频道列表失败 (HTTP ' + status + ')');
-  // channellist 返回结构可能为数组，或 { data: [...] }，字段用 cid/cpid/channel_name
-  const raw = Array.isArray(json) ? json
-    : ((json.data && (json.data.channels || json.data)) || json.channels || json.data || []);
-  const list = Array.isArray(raw) ? raw : [];
+  // channellist 字段用 cid/pid/channel_name
+  const list = toArray(json);
   const norm = list.map((ch) => {
     const id = ch.cid != null ? ch.cid : (ch.id != null ? ch.id : ch.channelId);
     const name = ch.channel_name || ch.name || ch.channelName || ('频道' + id);
-    const pid = ch.cpid != null ? ch.cpid : (ch.pid != null ? ch.pid : (ch.parent != null ? ch.parent : null));
+    const pid = ch.pid != null ? ch.pid : (ch.cpid != null ? ch.cpid : (ch.parent != null ? ch.parent : null));
     return { id, name, pid };
   });
   const byId = {};
