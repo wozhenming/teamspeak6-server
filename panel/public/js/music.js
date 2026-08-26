@@ -61,7 +61,7 @@ TSPages.music = async function () {
     <div class="card">
       <h3><span>TeamSpeak 推流</span>
         <span>
-          <button class="btn btn-sm btn-primary" id="btn-ts-link">连接到频道</button>
+          <button class="btn btn-sm btn-primary" id="btn-ts-link">生成机器人</button>
           <button class="btn btn-sm" id="btn-ts-unlink">断开</button>
         </span>
       </h3>
@@ -428,9 +428,13 @@ TSPages.music = async function () {
     const sel = $('ts-channel');
     try {
       const cfg = await API.musicTsConfig();
+      $('ts-key').value = cfg.tsApiKey || '';
+      if (!cfg.tsApiKey) {
+        sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
+        return;
+      }
       const channels = await API.musicTsChannels();
       const saved = cfg.ts6mgrChannel || '';
-      $('ts-key').value = cfg.tsApiKey || '';
       sel.innerHTML = '';
       if (!channels.length) {
         sel.innerHTML = '<option value="">（无频道，请先在 TS 创建）</option>';
@@ -452,7 +456,15 @@ TSPages.music = async function () {
       sel.innerHTML = '<option value="">（加载失败：' + e.message + '）</option>';
     }
   }
-  $('btn-ts-refresh').onclick = loadTsChannels;
+  // ↻ 先保存当前填写的 Key，再刷新频道列表
+  $('btn-ts-refresh').onclick = async () => {
+    const key = $('ts-key').value.trim();
+    const ch = $('ts-channel').value.trim();
+    if (key) {
+      try { await API.musicTsSaveConfig({ tsApiKey: key, ts6mgrChannel: ch }); } catch (e) { /* 忽略 */ }
+    }
+    loadTsChannels();
+  };
   loadTsChannels();
   refreshTsStatus();
 
