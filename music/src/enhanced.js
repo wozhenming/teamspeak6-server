@@ -115,14 +115,17 @@ async function qrCreate() {
 
 // 轮询扫码状态: 800 过期 / 801 等待 / 802 已扫未确认 / 803 成功
 async function qrCheck(key) {
-  const res = await req('/login/qr/check', { qs: { key, noloading: 'true' } });
-  // 登录成功(803)时，api-enhanced 会把会话 cookie 放在 res.data.cookie 里，
-  // 也通过 set-cookie 头返回（req() 已吸收）。这里把 body 里那份也吸收，确保 MUSIC_U 落到本地。
+  // api-enhanced 的 /login/qr/check 需要 ua 参数才会在 803 成功时于 body 顶层返回 cookie
+  const res = await req('/login/qr/check', { qs: { key, noloading: 'true', ua: process.env.NCM_QR_UA || 'pc' } });
   if (res.code === 803) {
-    // api-enhanced 的 body 顶层有 cookie 字符串（如 "MUSIC_U=...; os=..."），
-    // 也兼容 data.cookie 与 set-cookie 头（req() 已吸收头部那份）。
+    // body 顶层 cookie（含 MUSIC_U），data.cookie / set-cookie 头兜底
     const c = res.cookie || (res.data && res.data.cookie) || '';
-    if (c) absorb(c);
+    if (c) {
+      console.log('[login] 803 吸收 cookie len=' + c.length + ' 含MUSIC_U=' + /MUSIC_U=/.test(c));
+      absorb(c);
+    } else {
+      console.log('[login] 803 但响应无 cookie 字段');
+    }
   }
   return { code: res.code, message: res.message || (res.data && res.data.message) || '' };
 }
