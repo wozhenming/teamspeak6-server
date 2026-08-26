@@ -118,8 +118,11 @@ async function qrCheck(key) {
   const res = await req('/login/qr/check', { qs: { key, noloading: 'true' } });
   // 登录成功(803)时，api-enhanced 会把会话 cookie 放在 res.data.cookie 里，
   // 也通过 set-cookie 头返回（req() 已吸收）。这里把 body 里那份也吸收，确保 MUSIC_U 落到本地。
-  if (res.code === 803 && res.data && res.data.cookie) {
-    absorb(res.data.cookie);
+  if (res.code === 803) {
+    // api-enhanced 的 body 顶层有 cookie 字符串（如 "MUSIC_U=...; os=..."），
+    // 也兼容 data.cookie 与 set-cookie 头（req() 已吸收头部那份）。
+    const c = res.cookie || (res.data && res.data.cookie) || '';
+    if (c) absorb(c);
   }
   return { code: res.code, message: res.message || (res.data && res.data.message) || '' };
 }
