@@ -243,6 +243,7 @@ async function bootstrap() {
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
     let botCid = null;
+    let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
     if (wantName) {
       const ch = chItems.find((x) => (x.channel_name || '') === wantName);
       if (ch) botCid = ch.cid;
@@ -251,6 +252,7 @@ async function bootstrap() {
       const bot = items.find((x) => x.client_nickname === '点歌机器人')
         || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
       if (bot) botCid = bot.cid;
+      botSeen = botSeen || !!bot;
     }
     if (!botCid) {
       const voice = items.find((x) => String(x.client_type) !== '1');
@@ -264,7 +266,7 @@ async function bootstrap() {
       try { await cmd('servernotifyregister event=' + ev); }
       catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
     }
-    if (!bot) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
+    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     bootstrapped = true;
     state = 'listening';
     console.log('[tschat] 已加入频道并监听 !点歌 命令 (clid=' + myClid + ', cid=' + (botCid || myCid || '?') + ', 昵称=' + nick + ')');
