@@ -36,17 +36,24 @@ function startImgProxy(port) {
         return res.end('blocked host')
       }
       const lib = t.protocol === 'https:' ? https : http
-      const r = lib.get(
-        t,
-        { headers: { Referer: 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' } },
-        (up) => {
-          res.writeHead(up.statusCode || 200, {
-            'content-type': up.headers['content-type'] || 'image/jpeg',
-            'cache-control': 'public, max-age=86400',
-          })
-          up.pipe(res)
+      // 关键：转发 Range 头并透传 206/Content-Range，让下游(ffmpeg -ss 输入定位)能真正跳转，
+      // 否则 seek 会被上游无视、音频从头开始
+      const upstreamHeaders = {
+        Referer: 'https://music.126.net/',
+        'User-Agent': 'Mozilla/5.0',
+      }
+      if (req.headers.range) upstreamHeaders.Range = req.headers.range
+      const r = lib.get(t, { headers: upstreamHeaders }, (up) => {
+        const h = {
+          'content-type': up.headers['content-type'] || 'image/jpeg',
+          'cache-control': 'public, max-age=86400',
         }
-      )
+        if (up.headers['content-range']) h['content-range'] = up.headers['content-range']
+        if (up.headers['accept-ranges']) h['accept-ranges'] = up.headers['accept-ranges']
+        if (up.headers['content-length']) h['content-length'] = up.headers['content-length']
+        res.writeHead(up.statusCode || 200, h)
+        up.pipe(res)
+      })
       r.on('error', () => {
         if (!res.headersSent) {
           res.writeHead(502)
