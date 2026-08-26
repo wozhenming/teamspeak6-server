@@ -96,7 +96,7 @@ TSPages.music = async function () {
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
-          <div class="muted" style="font-size:11px">在机器人所在频道的「频道聊天」里发送 <code>!点歌 &lt;歌曲ID或网易云链接&gt;</code>，或私聊「<code>点歌助手</code>」</div>
+          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code></div>
         </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>

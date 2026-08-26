@@ -23,7 +23,6 @@ const enhanced = require('./enhanced');
 const queue = require('./queue');
 const player = require('./player');
 
-const CMD_PREFIX = /^!\s*(?:点歌|play|dian)\s*/i;
 let conn = null;          // 当前 ssh 连接
 let stream = null;        // shell 数据流
 let retryTimer = null;
@@ -79,11 +78,16 @@ function extractSongId(text) {
 }
 
 // ---------- 与队列/播放器对接 ----------
-async function handleRequest(rawText, invokerName) {
-  const text = rawText.trim();
-  const hasPrefix = CMD_PREFIX.test(text);
-  const body = text.replace(CMD_PREFIX, '').trim();
-  if (!hasPrefix && !/^https?:\/\//i.test(body) && !/^\d{4,12}$/.test(body)) return; // 普通聊天忽略
+
+// 确保正在播放：只要当前没在放，就开播（队列空则从头/继续）
+function ensurePlaying() {
+  const st = player.get();
+  if (st.playing) return;
+  if (!st.current) player.play();
+  else player.resume();
+}
+
+async function addSong(body, invokerName) {
   const songId = extractSongId(body);
   if (!songId) {
     reply(invokerName, '用法：!点歌 <歌曲ID 或 网易云链接>');
@@ -96,7 +100,6 @@ async function handleRequest(rawText, invokerName) {
       detail = d && d.songs && d.songs[0];
     } catch (e) { /* 详情失败仍可尝试入队最小信息 */ }
     if (!detail) detail = { id: songId, name: '歌曲 ' + songId };
-    const beforeIdle = !player.get().current;
     queue.enqueue({
       name: detail.name,
       artists: (detail.ar || []).map((a) => a.name).join(' '),
@@ -105,12 +108,54 @@ async function handleRequest(rawText, invokerName) {
       duration: detail.dt ? Math.round(detail.dt / 1000) : 0,
       fee: detail.fee != null ? detail.fee : null,
     }, (invokerName || 'TS用户') + '(TS)');
-    if (beforeIdle) player.play();
+    ensurePlaying(); // 队列为空或未在播放时自动开播
     const pos = queue.all().length;
     reply(invokerName, '✔ 已加入队列：' + detail.name + '（第 ' + pos + ' 位）');
   } catch (e) {
     reply(invokerName, '✖ 点歌失败：' + e.message);
   }
+}
+
+function runControl(cmd, invokerName) {
+  try {
+    const st = player.get();
+    if (cmd === 'play') {
+      if (!st.current) player.play();
+      else player.resume();
+      reply(invokerName, st.current && st.current.title ? '▶ 已继续播放：' + st.current.title : '▶ 已开始播放');
+    } else if (cmd === 'pause') {
+      player.pause();
+      reply(invokerName, '⏸ 已暂停');
+    } else if (cmd === 'next') {
+      const r = player.next();
+      const cur = r && r.current;
+      reply(invokerName, cur ? '⏭ 已切歌：' + cur.title : '队列末尾/为空，无法继续切');
+    }
+  } catch (e) {
+    reply(invokerName, '✖ 操作失败：' + e.message);
+  }
+}
+
+// 命令分发：!点歌/!点 <ID|链接> · !播放/!继续/!pause · !暂停 · !切歌/!下一首/!next
+const CTRL_MAP = {
+  play: 'play', resume: 'play', 继续: 'play', 播放: 'play', 开始: 'play',
+  pause: 'pause', 暂停: 'pause',
+  next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
+};
+function handleRequest(rawText, invokerName) {
+  const text = (rawText || '').trim();
+  if (!text) return;
+  const ctl = text.match(/^!\s*(\S+)\s*(.*)$/);
+  if (ctl) {
+    const w = ctl[1].toLowerCase();
+    const rest = ctl[2].trim();
+    if (CTRL_MAP[w]) { runControl(CTRL_MAP[w], invokerName); return; }
+    if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) { addSong(rest, invokerName); return; }
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌');
+    return;
+  }
+  // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
+  if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) addSong(text, invokerName);
 }
 
 // 向频道回执（targetmode=2 为频道聊天）
