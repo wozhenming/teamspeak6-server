@@ -28,7 +28,7 @@ const config = {
   // 面板只需填写“频道”。改 .env 可覆盖；面板保存的配置会持久化覆盖这里。
   ts6mgrUrl: env('TS6MGR_URL', 'http://backend:3001'),
   ts6mgrUser: env('TS6MGR_USER', 'tsbot'),
-  ts6mgrPass: env('TS6MGR_PASS', 'tsbot123'),
+  ts6mgrPass: env('TS6MGR_PASS', 'Tsbot123'),
   ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
   ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
   // ts6-manager 拉取本服务音频流所用的地址（同网络内用 music:3200）

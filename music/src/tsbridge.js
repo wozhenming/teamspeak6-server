@@ -47,16 +47,23 @@ async function tryLogin(user, pass) {
 }
 
 // 自动确保 ts6-manager 存在管理员账号（无需手动去 :3002 注册）：
-// 1) 先用配置的账号密码登录；2) 旧版镜像默认 admin/admin；3) 新版镜像走 /api/setup 首次向导
+// 1) 先用配置的账号密码登录；2) 旧版镜像默认 admin/admin；3) 新镜像走 /api/setup 首次向导
 async function ensureAdmin() {
   const c = cfg();
   try { return await tryLogin(c.user, c.pass); } catch (e) { /* 继续 */ }
   try { return await tryLogin('admin', 'admin'); } catch (e) { /* 继续 */ }
-  const setup = await authFetch('POST', '/api/setup', null, {
-    username: c.user, password: c.pass, email: c.user + '@local',
-  });
-  if (setup.status === 200 || setup.status === 201) return await tryLogin(c.user, c.pass);
-  throw new Error('无法登录/创建 ts6-manager 管理员，请在 ' + c.url + '/setup 手动创建后重试');
+  // 新镜像：先查是否需要初始化，再调用 /api/setup/init 创建首个管理员
+  try {
+    const st = await authFetch('GET', '/api/setup/status', null);
+    const needsSetup = st.json && st.json.needsSetup;
+    if (needsSetup) {
+      const init = await authFetch('POST', '/api/setup/init', null, {
+        username: c.user, password: c.pass, displayName: c.user,
+      });
+      if (init.status === 200 || init.status === 201) return await tryLogin(c.user, c.pass);
+    }
+  } catch (e) { /* 旧镜像可能没有 /api/setup/status，忽略 */ }
+  throw new Error('无法登录/创建 ts6-manager 管理员，请在 ' + c.url + '/setup 手动创建，并把账号密码填进 .env 的 TS6MGR_USER/TS6MGR_PASS');
 }
 
 // 解析 TeamSpeak WebQuery API Key：优先用配置/环境变量；否则提示在 .env 设置
@@ -69,7 +76,9 @@ async function resolveApiKey() {
 async function getServers(token) {
   const { status, json } = await authFetch('GET', '/api/servers', token);
   if (status !== 200) throw new Error('获取 TS 连接列表失败 (HTTP ' + status + ')');
-  const list = (json.data && json.data.servers) || json.servers || json.data || [];
+  // ts6-manager 直接返回数组（顶层）；兼容可能的 data 包裹
+  const list = Array.isArray(json) ? json
+    : ((json.data && json.data.servers) || json.servers || json.data || []);
   if (!Array.isArray(list)) throw new Error('ts6-manager 中未配置 TeamSpeak 连接');
   return list;
 }
@@ -104,12 +113,14 @@ async function getBots(token) {
 async function getChannels(token, serverConfigId) {
   const { status, json } = await authFetch('GET', '/api/servers/' + serverConfigId + '/channels', token);
   if (status !== 200) throw new Error('获取频道列表失败 (HTTP ' + status + ')');
-  const raw = (json.data && (json.data.channels || json.data)) || json.channels || json.data || [];
+  // channellist 返回结构可能为数组，或 { data: [...] }，字段用 cid/cpid/channel_name
+  const raw = Array.isArray(json) ? json
+    : ((json.data && (json.data.channels || json.data)) || json.channels || json.data || []);
   const list = Array.isArray(raw) ? raw : [];
   const norm = list.map((ch) => {
-    const id = ch.id != null ? ch.id : (ch.cid != null ? ch.cid : ch.channelId);
-    const name = ch.name || ch.channelName || ch.channel_name || ('频道' + id);
-    const pid = ch.pid != null ? ch.pid : (ch.parent != null ? ch.parent : null);
+    const id = ch.cid != null ? ch.cid : (ch.id != null ? ch.id : ch.channelId);
+    const name = ch.channel_name || ch.name || ch.channelName || ('频道' + id);
+    const pid = ch.cpid != null ? ch.cpid : (ch.pid != null ? ch.pid : (ch.parent != null ? ch.parent : null));
     return { id, name, pid };
   });
   const byId = {};
@@ -180,6 +191,22 @@ async function ensureBot(token, serverConfigId) {
   return bot.id;
 }
 
+// 等待 bot 真正连上 TS（start 是异步的，play-radio 要求已 connected）
+async function waitBotConnected(token, botId, tries = 30) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const { status, json } = await authFetch('GET', '/api/music-bots/' + botId, token);
+      if (status === 200) {
+        const b = (json.data && (json.data.bot || json.data)) || json;
+        const s = b.status;
+        if (s === 'connected' || s === 'playing' || s === 'paused') return true;
+      }
+    } catch (e) { /* 忽略，继续等 */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 async function link() {
   const c = cfg();
   const token = await ensureAdmin();
@@ -188,12 +215,15 @@ async function link() {
   const stationId = await ensureStation(token, serverConfigId);
 
   await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+  // 等 bot 连接上频道后再播放电台（避免 “Bot is not connected”）
+  await waitBotConnected(token, botId);
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
   if (play.status !== 200) {
-    throw new Error('播放电台失败 (HTTP ' + play.status + ')');
+    const msg = (play.json && (play.json.error && play.json.error.message)) || ('HTTP ' + play.status);
+    throw new Error('播放电台失败（' + msg + '）');
   }
   // 持久化 botId，避免重复连接时反复新建机器人
-  try { config.saveTsBridge({ ts6mgrBotId: String(botId) }); } catch (e) { /* 忽略 */ }
+  try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: c.channel }); } catch (e) { /* 忽略 */ }
   return { ok: true, botId, stationId, serverConfigId };
 }
 
