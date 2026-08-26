@@ -30,8 +30,15 @@ let retryTimer = null;
 let started = false;
 let state = 'stopped';    // stopped | connecting | listening | error
 
+function envKillSwitch() {
+  return process.env.TS_CHAT_ENABLED === '0';
+}
+
+// 是否应处于运行状态：面板/持久化配置优先，env 仅作总闸
 function enabled() {
-  return !!(config.tsQueryAdminPassword && process.env.TS_CHAT_ENABLED !== '0');
+  if (envKillSwitch()) return false;
+  if (config.tsChatEnabled === false) return false;
+  return !!config.tsQueryAdminPassword;
 }
 
 // ---------- ServerQuery 行协议小工具 ----------
@@ -185,11 +192,18 @@ function connect() {
           dispatchLine(line);
         }
       });
-      s.on('close', () => fail(new Error('shell closed')));
+      s.on('close', () => {
+        // 面板主动停止时 conn.end() 会触发 close，属正常流程
+        if (!started) { teardown(); return; }
+        fail(new Error('shell closed'));
+      });
       s.stderr && s.stderr.on('data', () => {});
     });
   });
-  c.on('error', (e) => fail(e));
+  c.on('error', (e) => {
+    if (!started) { teardown(); return; }
+    fail(e);
+  });
 
   c.connect({
     host,
@@ -246,17 +260,58 @@ function scheduleRetry() {
 }
 
 function fail(err) {
+  if (!started) { teardown(); return; }
   state = 'error';
   console.log('[tschat] 断开：' + (err && err.message ? err.message : err));
+  teardown();
+  if (started && enabled()) scheduleRetry();
+}
+
+// 立即停掉监听（面板关闭开关时调用）
+function stop() {
+  started = false;
+  state = 'stopped';
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  teardown();
+}
+
+function teardown() {
+  while (pending.length) {
+    const p = pending.shift();
+    clearTimeout(p.timer);
+    try { p.reject(new Error('已停止')); } catch (e) {}
+  }
   try { conn && conn.end(); } catch (e) {}
   conn = null; stream = null; bootstrapped = false;
-  if (enabled()) scheduleRetry();
+}
+
+// 面板保存配置后调用：按最新配置启/停/重连
+let appliedSig = null; // 当前连接使用的凭据指纹
+function applyConfig() {
+  const want = enabled();
+  const sig = config.tsQueryAdminPassword || '';
+  if (!want) {
+    if (started) stop();
+    console.log('[tschat] 已按配置停止');
+    return;
+  }
+  // 需要启动，或密码已变化 → 重建连接
+  if (started && appliedSig !== sig) {
+    console.log('[tschat] 查询密码变更，重建连接');
+    teardown();
+    started = false;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  }
+  if (!started) {
+    appliedSig = sig;
+    start();
+  }
 }
 
 function start() {
   if (started) return;
   if (!enabled()) {
-    console.log('[tschat] 未启用（需设置 TS_QUERY_ADMIN_PASSWORD，或显式 TS_CHAT_ENABLED=0 关闭）');
+    console.log('[tschat] 未启用（需设置查询密码；可在点歌页「频道聊天点歌」中配置）');
     return;
   }
   started = true;
@@ -265,8 +320,10 @@ function start() {
 
 module.exports = {
   start,
+  stop,
+  applyConfig,
   enabled,
-  getState: () => ({ state, enabled: enabled() }),
+  getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword }),
   // 测试钩子（非公开接口）
   _internal: { extractSongId, parseParams, esc, unesc, handleRequest },
 };

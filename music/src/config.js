@@ -45,6 +45,10 @@ const config = {
   tsApiKey: env('TS_API_KEY', ''),
   // TS 服务器管理员密码（仅用于首次自动生成 API Key；留空则需手动在 .env 配 TS_API_KEY）
   tsQueryAdminPassword: env('TS_QUERY_ADMIN_PASSWORD', ''),
+  // TS 频道聊天点歌开关：默认随密码存在而启用；面板可覆盖并持久化
+  tsChatEnabled: process.env.TS_CHAT_ENABLED !== undefined
+    ? process.env.TS_CHAT_ENABLED !== '0'
+    : true,
 };
 
 // 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
@@ -60,6 +64,8 @@ function loadTsBridge() {
     if (o.tsHost) config.tsHost = o.tsHost;
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
+    if (o.tsQueryAdminPassword) config.tsQueryAdminPassword = o.tsQueryAdminPassword;
+    if (o.tsChatEnabled != null) config.tsChatEnabled = !!o.tsChatEnabled;
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
@@ -73,6 +79,8 @@ config.saveTsBridge = (o) => {
     tsHost: (o.tsHost || '').trim() || config.tsHost,
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
+    tsQueryAdminPassword: (o.tsQueryAdminPassword || '').trim() || config.tsQueryAdminPassword,
+    tsChatEnabled: o.tsChatEnabled != null ? !!o.tsChatEnabled : (config.tsChatEnabled !== false),
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }

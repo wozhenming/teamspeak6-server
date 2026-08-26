@@ -307,10 +307,21 @@ app.get('/api/ts-bot/config', (req, res) => {
     tsHost: config.tsHost,
     tsWebqueryPort: config.tsWebqueryPort,
     tsApiKey: config.tsApiKey,
+    tsChatEnabled: config.tsChatEnabled !== false,
+    hasQueryPassword: !!config.tsQueryAdminPassword,
   });
 });
 app.put('/api/ts-bot/config', (req, res) => {
-  try { ok(res, config.saveTsBridge(req.body || {})); } catch (e) { fail(res, 500, 'CFG_FAIL', e.message); }
+  try {
+    const out = config.saveTsBridge(req.body || {});
+    // 聊天点歌配置可能变化：热应用（启停/重连）
+    tschat.applyConfig();
+    ok(res, { ...out, tsChatEnabled: config.tsChatEnabled !== false, hasQueryPassword: !!config.tsQueryAdminPassword });
+  } catch (e) { fail(res, 500, 'CFG_FAIL', e.message); }
+});
+// 频道聊天点歌运行状态
+app.get('/api/ts-bot/chat/status', (req, res) => {
+  ok(res, tschat.getState());
 });
 app.post('/api/ts-bot/link', async (req, res) => {
   try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }

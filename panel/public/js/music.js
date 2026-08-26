@@ -87,6 +87,18 @@ TSPages.music = async function () {
           <span class="muted" style="font-size:12px">TeamSpeak WebQuery API Key</span>
           <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
+        <div style="display:flex;flex-direction:column;gap:3px;border-top:1px dashed var(--border);padding-top:8px">
+          <span class="muted" style="font-size:12px">频道聊天点歌（用户发送 !点歌 &lt;歌曲ID或链接&gt;）</span>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12.5px">
+            <input type="checkbox" id="ts-chat-on">
+            在频道内启用聊天点歌
+          </label>
+          <input id="ts-chat-pwd" type="password" class="input" placeholder="serveradmin 查询密码（已配置可不填）" autocomplete="new-password">
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
+            <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
+          </div>
+        </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
     </div>
@@ -457,6 +469,11 @@ TSPages.music = async function () {
     try {
       const cfg = await API.musicTsConfig();
       $('ts-key').value = cfg.tsApiKey || '';
+      $('ts-chat-on').checked = cfg.tsChatEnabled !== false;
+      $('ts-chat-pwd').placeholder = cfg.hasQueryPassword
+        ? '查询密码已配置（留空保持不变）'
+        : 'serveradmin 查询密码（启用聊天点歌必填）';
+      refreshChatState();
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
         return;
@@ -492,6 +509,40 @@ TSPages.music = async function () {
       try { await API.musicTsSaveConfig({ tsApiKey: key, ts6mgrChannel: ch }); } catch (e) { /* 忽略 */ }
     }
     loadTsChannels();
+  };
+
+  // ---------- 频道聊天点歌设置 ----------
+  async function refreshChatState() {
+    if (token !== TSUtils.navToken()) return;
+    try {
+      const s = await API.musicTsChatStatus();
+      const map = {
+        listening: '监听中：在频道发送 !点歌 <ID|链接> 即可',
+        connecting: '连接 TS 查询…',
+        error: '异常（自动重试中，检查密码/白名单）',
+        stopped: '未启用',
+      };
+      $('ts-chat-state').textContent = map[s.state] || (s.enabled ? '待机' : '未启用');
+    } catch (e) { /* 服务不可用 */ }
+  }
+  $('btn-ts-chat-save').onclick = async () => {
+    try {
+      const on = $('ts-chat-on').checked;
+      const pwd = $('ts-chat-pwd').value.trim();
+      const cfg = await API.musicTsConfig();
+      if (on && !pwd && !cfg.hasQueryPassword) {
+        TSUtils.toast('启用聊天点歌需先填写 serveradmin 查询密码', 'error');
+        return;
+      }
+      const payload = { tsChatEnabled: on };
+      if (pwd) payload.tsQueryAdminPassword = pwd;
+      await API.musicTsSaveConfig(payload);
+      TSUtils.toast('聊天点歌设置已保存', 'success');
+      $('ts-chat-pwd').value = '';
+      await loadTsChannels();
+    } catch (e) {
+      TSUtils.toast('保存失败：' + e.message, 'error');
+    }
   };
   loadTsChannels();
   refreshTsStatus();
