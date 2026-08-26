@@ -77,14 +77,45 @@ app.get('/api/stream', async (req, res) => {
   let closed = false;
   req.on('close', () => { closed = true; });
 
+  const pipeFf = (ff, isDone) => new Promise((resolve) => {
+    ff.stdout.on('data', (chunk) => {
+      if (isDone()) return;
+      if (!res.write(chunk)) {
+        ff.stdout.pause();
+        res.once('drain', () => { if (!isDone()) ff.stdout.resume(); });
+      }
+    });
+    ff.on('error', () => resolve());
+    ff.on('close', () => resolve());
+    req.on('close', () => { try { ff.kill('SIGKILL'); } catch (e) {} resolve(); });
+  });
+
+  // 空闲时持续推送静音，保证电台流永不断流（否则机器人解码器会停摆/放弃，之后有歌也没声音）
+  const streamSilence = () => new Promise((resolve) => {
+    const ff = spawn('ffmpeg', [
+      '-re', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+      '-acodec', 'libmp3lame', '-ab', '32k', '-f', 'mp3', '-',
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const done = () => closed || (() => { const st = player.get(); return !!(st.current && st.playing); })();
+    const iv = setInterval(() => {
+      const st = player.get();
+      if (closed || (st.current && st.playing)) {
+        clearInterval(iv);
+        try { ff.kill('SIGKILL'); } catch (e) {}
+        resolve();
+      }
+    }, 500);
+    pipeFf(ff, () => closed).then(() => { clearInterval(iv); resolve(); });
+  });
+
   const pump = async () => {
     while (!closed) {
       let st = player.get();
       if (!st.current) {
         if (queue.all().length) { player.play(); st = player.get(); }
-        else { await sleep(1000); continue; }
+        else { await streamSilence(); continue; }
       }
-      if (!st.playing) { await sleep(500); continue; }
+      if (!st.playing) { await streamSilence(); continue; }
 
       const curId = st.current.id;
       let audioUrl = '';
@@ -97,33 +128,17 @@ app.get('/api/stream', async (req, res) => {
         : audioUrl;
 
       // 用 ffmpeg 转码为稳定 MP3 流（-re 按原速推送，避免被电台客户端当成文件缓存满后回跳）
-      await new Promise((resolve) => {
-        const ff = spawn('ffmpeg', [
-          '-re',
-          '-protocol_whitelist', 'file,http,https,tcp,pipe',
-          '-i', input,
-          '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
-          '-f', 'mp3', '-',
-        ], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const ff = spawn('ffmpeg', [
+        '-re',
+        '-protocol_whitelist', 'file,http,https,tcp,pipe',
+        '-i', input,
+        '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100',
+        '-f', 'mp3', '-',
+      ], { stdio: ['ignore', 'pipe', 'ignore'] });
 
-        let aborted = false;
-        const check = () => {
-          const cur = player.get().current;
-          if (!cur || cur.id !== curId) { aborted = true; try { ff.kill('SIGKILL'); } catch (e) {} }
-        };
-
-        ff.stdout.on('data', (chunk) => {
-          check();
-          if (aborted) return;
-          if (!res.write(chunk)) {
-            ff.stdout.pause();
-            res.once('drain', () => { if (!aborted) ff.stdout.resume(); });
-          }
-        });
-        ff.stdout.on('end', resolve);
-        ff.stdout.on('error', resolve);
-        ff.on('close', () => resolve());
-        req.on('close', () => { aborted = true; try { ff.kill('SIGKILL'); } catch (e) {} resolve(); });
+      await pipeFf(ff, () => {
+        const cur = player.get().current;
+        return closed || !cur || cur.id !== curId;
       });
 
       if (closed) break;

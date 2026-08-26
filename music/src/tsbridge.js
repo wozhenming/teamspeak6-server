@@ -208,16 +208,29 @@ async function ensureStation(token, serverConfigId) {
   return st.id;
 }
 
+// 找到我们的点歌机器人：优先用配置的 botId，其次按名字匹配（避免重复创建出多个机器人）
+function pickBot(c, bots) {
+  if (c.botId) {
+    const byId = bots.find((b) => b && b.id === c.botId);
+    if (byId) return byId;
+  }
+  return bots.find((b) => b && b.name === '点歌机器人')
+    || bots.find((b) => b && b.nickname === '点歌机器人')
+    || null;
+}
+
 async function ensureBot(token, serverConfigId) {
   const c = cfg();
-  if (c.botId) {
-    const bots = await getBots(token);
-    const bot = bots.find((b) => b && b.id === c.botId);
-    if (!bot) throw new Error('指定的音乐机器人不存在: ' + c.botId);
+  let bots = [];
+  try { bots = await getBots(token); } catch (e) { bots = []; }
+  const existing = pickBot(c, bots);
+  if (existing) {
+    // 尽力更新加入的频道（失败不阻断）
     if (c.channel) {
-      await authFetch('PUT', '/api/music-bots/' + c.botId, token, { defaultChannel: c.channel });
+      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: c.channel }); } catch (e) { /* 忽略 */ }
     }
-    return c.botId;
+    try { config.saveTsBridge({ ts6mgrBotId: String(existing.id) }); } catch (e) { /* 忽略 */ }
+    return existing.id;
   }
   const name = '点歌机器人';
   const create = await authFetch('POST', '/api/music-bots', token, {
@@ -274,10 +287,10 @@ async function unlink() {
   const c = cfg();
   const token = await ensureAdmin();
   const bots = await getBots(token);
-  const botId = c.botId || (bots[0] && bots[0].id);
-  if (!botId) throw new Error('未找到音乐机器人');
-  await authFetch('POST', '/api/music-bots/' + botId + '/stop-playback', token);
-  return { ok: true, botId };
+  const bot = pickBot(c, bots) || bots[0];
+  if (!bot) throw new Error('未找到音乐机器人');
+  await authFetch('POST', '/api/music-bots/' + bot.id + '/stop-playback', token);
+  return { ok: true, botId: bot.id };
 }
 
 async function status() {
@@ -288,11 +301,14 @@ async function status() {
   }
   try {
     const bots = await getBots(token);
-    const botId = c.botId || (bots[0] && bots[0].id);
-    if (!botId) return { enabled: true, connected: false };
-    const { status, json } = await authFetch('GET', '/api/music-bots/' + botId, token);
-    if (status !== 200) return { enabled: true, connected: false };
-    const bot = (json.data && json.data.bot) || json.data || json;
+    const target = pickBot(c, bots) || bots[0];
+    if (!target) return { enabled: true, connected: false };
+    let bot = target;
+    if (!bot.status) {
+      const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, token);
+      if (status !== 200) return { enabled: true, connected: false };
+      bot = (json.data && json.data.bot) || json.data || json;
+    }
     return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null };
   } catch (e) {
     return { enabled: true, connected: false, error: e.message };
