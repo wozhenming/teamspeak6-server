@@ -85,6 +85,9 @@ function hasLoginCookie() {
   return !!(cookies.get('MUSIC_U') || '').trim();
 }
 
+// 启动时从持久化文件加载登录 cookie（此前漏调 loadCookies()：jar 每次启动都是空的，导致登录无法跨重启保留）
+loadCookies();
+
 // ---------- 基础请求 ----------
 async function req(pathname, { method = 'GET', qs = {} } = {}) {
   const url = new URL(config.apiBase + pathname);
@@ -149,6 +152,10 @@ async function qrCheck(key) {
     if (c) {
       console.log('[login] 803 吸收 cookie len=' + c.length + ' 含MUSIC_U=' + /MUSIC_U=/.test(c));
       absorbLogin(c); // 保留完整会话 cookie，保证 /login/status 识别
+      try {
+        const txt = fs.readFileSync(cookieFile, 'utf8');
+        console.log(`[login] 落盘检查 size=${txt.length} 含MUSIC_U=${/MUSIC_U=/.test(txt)} 键=${(txt.split(';').map(s => s.split('=')[0].trim()).filter(Boolean).join(','))}`);
+      } catch (e) { console.log('[login] 落盘读取失败：' + e.message); }
     } else {
       console.log('[login] 803 但响应无 cookie 字段');
     }

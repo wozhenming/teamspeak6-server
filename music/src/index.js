@@ -348,7 +348,12 @@ app.get('/api/status', async (req, res) => {
     // 诊断：本次请求带上的 cookie 里是否含 MUSIC_U
     const hlc = !!enhanced.hasLoginCookie;
     const jarHas = hlc ? enhanced.hasLoginCookie() : false;
-    if (!jarHas) console.log('[login] 诊断：cookie.jar 中无 MUSIC_U');
+    let diskHas = 'n/a';
+    try {
+      const t = fs.readFileSync(path.join(config.dataDir, 'cookie.txt'), 'utf8');
+      diskHas = /MUSIC_U=/.test(t);
+    } catch (e) { diskHas = 'missing'; }
+    console.log(`[login] 诊断 jar含MUSIC_U=${jarHas} cookie.txt含MUSIC_U=${diskHas}`);
     // 完全以真实 /login/status 为准；account/profile 任一存在即视为已登录
     const ls = await enhanced.loginStatus();
     const d = (ls && ls.data) || {};
