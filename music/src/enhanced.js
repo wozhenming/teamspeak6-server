@@ -244,14 +244,21 @@ async function playlist(id) {
 
 async function playlistTracks(id, limit = 60, offset = 0) {
   const res = await req('/playlist/track/all', { qs: { id, limit, offset } });
-  return (res.songs || []).map(s => ({
-    id: s.id,
-    name: s.name,
-    artists: (s.ar || []).map(a => a.name).join(' '),
-    album: (s.al || {}).name || '',
-    duration: s.dt ? Math.round(s.dt / 1000) : 0,
-    fee: s.fee != null ? s.fee : null,
-  }));
+  return (res.songs || []).map((s, idx) => {
+    const p = (res.privileges || [])[idx] || {};
+    const fee = s.fee != null ? s.fee : (p.fee != null ? p.fee : null);
+    const noCopyright = !!(s.noCopyrightRcmd || p.flag === 32);
+    return {
+      id: s.id,
+      name: s.name,
+      artists: (s.ar || []).map(a => a.name).join(' '),
+      album: (s.al || {}).name || '',
+      duration: s.dt ? Math.round(s.dt / 1000) : 0,
+      cover: (s.al || {}).picUrl || '',
+      fee,
+      noCopyright,
+    };
+  });
 }
 
 // 拉取歌单全部曲目（分页循环，封顶 cap 防止超长歌单拖垮），用于"全量加入队列"

@@ -33,30 +33,42 @@ app.get('/api/img', async (req, res) => {
   if (target.protocol !== 'http:' && target.protocol !== 'https:') return res.status(400).send('bad protocol');
   if (!IMG_HOSTS.some((h) => target.hostname.endsWith(h))) return res.status(400).send('blocked host');
 
-  // 若配置了上游图片代理（通常是 neteasemusic 容器，拥有外网出口），则转发给它
+  // 抓取图片（带超时 + 跟随重定向 + 伪装 Referer 绕过防盗链）。失败返回 null。
+  const fetchImage = async (url) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const r = await fetch(url, {
+        redirect: 'follow',
+        signal: ctrl.signal,
+        headers: { Referer: 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' },
+      });
+      if (!r.ok) return null;
+      const buf = Buffer.from(await r.arrayBuffer());
+      return { buf, contentType: r.headers.get('content-type') || 'image/jpeg' };
+    } catch (e) {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const sendImage = (r) => {
+    res.set('Content-Type', r.contentType);
+    res.set('Cache-Control', 'public, max-age=86400');
+    return res.send(r.buf);
+  };
+
+  // 1) 优先走上游图片代理（neteasemusic 容器出口，规避本容器无外网）；
+  // 2) 代理失败则本服务直接抓取兜底（部分环境本容器亦可达外网）。
   if (config.imgProxy) {
     const upstream = config.imgProxy.replace(/\/$/, '') + '/?u=' + encodeURIComponent(target.toString());
-    try {
-      const r = await fetch(upstream, { redirect: 'follow' });
-      if (!r.ok) return res.status(r.status).send('upstream ' + r.status);
-      const buf = Buffer.from(await r.arrayBuffer());
-      res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
-      res.set('Cache-Control', 'public, max-age=86400');
-      return res.send(buf);
-    } catch (e) { return res.status(502).send('img proxy error'); }
+    const r = await fetchImage(upstream);
+    if (r) return sendImage(r);
   }
-
-  try {
-    const r = await fetch(target.toString(), {
-      headers: { 'Referer': 'https://music.126.net/', 'User-Agent': 'Mozilla/5.0' },
-      redirect: 'follow',
-    });
-    if (!r.ok) return res.status(r.status).send('upstream ' + r.status);
-    const buf = Buffer.from(await r.arrayBuffer());
-    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(buf);
-  } catch (e) { res.status(502).send('fetch error'); }
+  const direct = await fetchImage(target.toString());
+  if (direct) return sendImage(direct);
+  return res.status(502).send('img fetch failed');
 });
 
 // ---------- 连续电台流（供 ts6-manager 音乐机器人作为电台源拉流） ----------
@@ -447,17 +459,24 @@ app.get('/api/search', async (req, res) => {
       }));
     } else {
       const list = result.songs || [];
+      const privs = result.privileges || [];
       data.total = result.songCount || list.length;
-      data.items = list.map(s => ({
-        id: s.id,
-        name: s.name,
-        artists: (s.ar || []).map(a => a.name).join(' '),
-        album: (s.al || {}).name || '',
-        duration: s.dt ? Math.round(s.dt / 1000) : 0,
-        cover: (s.al || {}).picUrl || '',
-        fee: s.fee != null ? s.fee : null,
-        noCopyright: !!s.noCopyrightRcmd,
-      }));
+      data.items = list.map((s, idx) => {
+        const p = privs[idx] || {};
+        // fee / 无版权标记常在平行的 privileges 数组里，song 上可能没有，这里兜底合并
+        const fee = s.fee != null ? s.fee : (p.fee != null ? p.fee : null);
+        const noCopyright = !!(s.noCopyrightRcmd || p.flag === 32);
+        return {
+          id: s.id,
+          name: s.name,
+          artists: (s.ar || []).map(a => a.name).join(' '),
+          album: (s.al || {}).name || '',
+          duration: s.dt ? Math.round(s.dt / 1000) : 0,
+          cover: (s.al || {}).picUrl || '',
+          fee,
+          noCopyright,
+        };
+      });
     }
     ok(res, data);
   } catch (e) { fail(res, 502, 'SEARCH_FAIL', e.message); }

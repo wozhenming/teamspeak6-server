@@ -170,7 +170,8 @@ TSPages.music = async function () {
   }
   function thumb(cover) {
     if (!cover) return '';
-    return `<img class="song-thumb" src="${API.musicImg(cover, '80y80')}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`;
+    const prox = API.musicImg(cover, '80y80');
+    return `<img class="song-thumb" src="${prox}" data-fallback="${cover}" alt="" loading="lazy" onerror="if(this.dataset.fallback&&this.src!==this.dataset.fallback){this.src=this.dataset.fallback;}else{this.style.visibility='hidden';}">`;
   }
   function fmtDur(sec) {
     if (!sec) return '0:00';
@@ -215,7 +216,15 @@ TSPages.music = async function () {
   function renderPlayer() {
     if (token !== TSUtils.navToken()) return;
     const st = playerState;
-    $('player-cover').src = st.current && st.current.cover ? API.musicImg(st.current.cover, '112y112') : '';
+    const pc = $('player-cover');
+    if (st.current && st.current.cover) {
+      pc.dataset.fallback = st.current.cover;
+      pc.onerror = () => { if (pc.dataset.fallback && pc.src !== pc.dataset.fallback) pc.src = pc.dataset.fallback; };
+      pc.src = API.musicImg(st.current.cover, '112y112');
+    } else {
+      pc.onerror = null;
+      pc.src = '';
+    }
     $('player-title').innerHTML = st.current ? (esc(st.current.title) + feeBadge(st.current.fee)) : '未在播放';
     $('player-artists').textContent = st.current ? (st.current.artists || '') : '';
     $('player-mode').textContent = st.queueLength ? `（队列 ${st.queueLength} 首）` : '';
