@@ -50,15 +50,16 @@ TSPages.users = async function () {
       return;
     }
 
-    // 昵称特殊标识：查询客户端(点歌助手/Query)不可能被普通用户冒充（只能是系统创建的）；而普通语音用户可随意取名，
-    // 故“点歌机器人”只对语音客户端显示，且只能作辅助提示（真正的判定以 ts6-manager 的 UID 为主）。
+    // 昵称特殊标识（防伪）：
+//  - 点歌助手 / Query：仅查询客户端，普通用户无法冒充，安全；
+//  - 点歌机器人：优先按已记录的 UID 精确识别（最可靠）；未记录时才按“语音客户端 + 昵称”提示。
     function nickBadge(c) {
       const n = c.nickname || '';
       const b = [];
       if (c.is_query) {
         if (n.includes('点歌助手')) b.push('<span class="badge violet">点歌助手</span>');
         b.push('<span class="badge blue">Query</span>');
-      } else if (n.includes('点歌机器人')) {
+      } else if (BOT_UID ? (c.uid && c.uid === BOT_UID) : n.includes('点歌机器人')) {
         b.push('<span class="badge orange">点歌机器人</span>');
       }
       return b.join(' ');
@@ -132,7 +133,8 @@ TSPages.users = async function () {
   }
 
   const channels = await API.channels(sid);
-  const perms = await API.musicTsChatPerms().catch(() => ({ chatCommands: {}, chatUserPermissions: {} }));
+  const perms = await API.musicTsChatPerms().catch(() => ({ chatCommands: {}, chatUserPermissions: {}, botUid: '' }));
+  const BOT_UID = perms.botUid || '';
 
   // 指令定义（name -> 全局开关）
   const CMD_LABELS = [['dian', '点歌'], ['play', '播放'], ['pause', '暂停'], ['next', '切歌'], ['loop', '循环'], ['status', '状态']];

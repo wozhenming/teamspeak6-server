@@ -374,26 +374,33 @@ async function bootstrap() {
     // clientlist 单行时可能是对象，统一成数组
     const rawItems = Array.isArray(list) ? list : [list];
     const items = rawItems.filter(Boolean);
-    // 1) 优先按已配置的点歌频道名定位；2) 其次按机器人昵称；3) 兜底第一个语音用户频道
+    let botCid = null;
+    let bot = null;
+    const voice = items.filter((x) => String(x.client_type) !== '1'); // 机器人必然是语音客户端
+    const findByName = () => voice.find((x) => x.client_nickname === '点歌机器人')
+      || voice.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人')) || null;
+    // 1) 已记录机器人 UID → 一律按 UID 精确识别（防普通用户冒名）
+    if (config.tsBotUid) {
+      const byUid = voice.find((x) => x.client_unique_identifier === config.tsBotUid);
+      if (byUid) bot = byUid;
+    }
+    if (!bot) bot = findByName(); // 2) 未知 UID 时按昵称兜底并顺带记录 UID
+    // 首次见到机器人时记录其 UID（此后以 UID 为准，冒名者不再被当机器人）
+    if (bot && bot.client_unique_identifier && bot.client_unique_identifier !== config.tsBotUid) {
+      try { config.saveTsBridge({ tsBotUid: bot.client_unique_identifier }); console.log('[tschat] 记录点歌机器人 UID=' + bot.client_unique_identifier); } catch (e) {}
+    }
+    // 3) 优先按已配置的点歌频道名定位加入频道；否则用机器人所在频道
     const wantName = (config.ts6mgrChannel || '').trim();
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
-    let botCid = null;
-    let botSeen = items.some((x) => String(x.client_type) !== '1' && x.client_nickname && x.client_nickname.includes('点歌机器人'));
     if (wantName) {
       const ch = chItems.find((x) => (x.channel_name || '') === wantName);
       if (ch) botCid = ch.cid;
     }
+    if (!botCid && bot && bot.cid != null) botCid = bot.cid;
     if (!botCid) {
-      // 只认语音客户端里的“点歌机器人”（普通用户能随意取名，但夹具以 UID 为准；此处仅作频道定位辅助）
-      const bot = items.find((x) => String(x.client_type) !== '1' && x.client_nickname === '点歌机器人')
-        || items.find((x) => String(x.client_type) !== '1' && x.client_nickname && x.client_nickname.includes('点歌机器人'));
-      if (bot) botCid = bot.cid;
-      botSeen = botSeen || !!bot;
-    }
-    if (!botCid) {
-      const voice = items.find((x) => String(x.client_type) !== '1');
-      if (voice && String(voice.cid) !== String(myCid) && voice.cid != null) botCid = voice.cid;
+      const anyVoice = voice.find((x) => x.cid != null && String(x.cid) !== String(myCid));
+      if (anyVoice) botCid = anyVoice.cid;
     }
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
@@ -403,7 +410,7 @@ async function bootstrap() {
       try { await cmd('servernotifyregister event=' + ev); }
       catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
     }
-    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
+    if (!bot) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     bootstrapped = true;
     state = 'listening';
     console.log('[tschat] 已加入频道并监听 !点歌 命令 (clid=' + myClid + ', cid=' + (botCid || myCid || '?') + ', 昵称=' + nick + ')');

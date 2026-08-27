@@ -335,7 +335,7 @@ app.get('/api/ts-bot/chat/status', (req, res) => {
 
 // 用户级指令权限：GET 返回 全局(chastCommands) + 每用户(chatUserPermissions)
 app.get('/api/ts-bot/chat/permissions', (req, res) => {
-  ok(res, { chatCommands: config.chatCommands, chatUserPermissions: config.chatUserPermissions || {} });
+  ok(res, { chatCommands: config.chatCommands, chatUserPermissions: config.chatUserPermissions || {}, botUid: config.tsBotUid || '' });
 });
 // 设置某用户的指令权限：body={ uid, allowed:[...] } 或 { uid, useGlobal:true }（清除该用户配置）
 app.put('/api/ts-bot/chat/permissions', (req, res) => {

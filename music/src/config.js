@@ -59,6 +59,8 @@ const config = {
   chatCommands: Object.assign({}, CHAT_CMD_DEFAULT),
   // 用户级指令权限覆盖：{ [TS客户端UID]: ['dian','play',...] }；某用户未配置时回退到上面的全局 chatCommands
   chatUserPermissions: {},
+  // 点歌机器人的 TS 客户端唯一标识(建连时按名字捕获并持久化，之后一律按 UID 识别，防止他人冒名)
+  tsBotUid: '',
 };
 
 // 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
@@ -82,6 +84,7 @@ function loadTsBridge() {
     if (o.chatUserPermissions && typeof o.chatUserPermissions === 'object') {
       config.chatUserPermissions = o.chatUserPermissions;
     }
+    if (o.tsBotUid) config.tsBotUid = o.tsBotUid;
     if (o.streamTokenEnabled != null) config.streamTokenEnabled = !!o.streamTokenEnabled;
     if (o.streamToken) config.streamToken = o.streamToken;
   } catch (e) { /* 无持久化配置 */ }
@@ -106,6 +109,7 @@ config.saveTsBridge = (o) => {
     chatUserPermissions: (o.chatUserPermissions && typeof o.chatUserPermissions === 'object')
       ? o.chatUserPermissions
       : (config.chatUserPermissions || {}),
+    tsBotUid: (o.tsBotUid || '').trim() || config.tsBotUid,
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }
