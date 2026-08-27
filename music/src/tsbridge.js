@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const { config } = require('./config');
 const { ensureStreamPublicUrl } = require('./streamurl');
+const player = require('./player');
 
 // 管理员 token 缓存：避免面板每次轮询/切页都重新登录（auth 接口有 15次/15分钟 限流）
 let tokenCache = { token: null, user: null, at: 0 };
@@ -192,7 +193,12 @@ async function getChannels(token, configId) {
     const id = ch.cid != null ? ch.cid : (ch.id != null ? ch.id : ch.channelId);
     const name = ch.channel_name || ch.name || ch.channelName || ('频道' + id);
     const pid = ch.pid != null ? ch.pid : (ch.cpid != null ? ch.cpid : (ch.parent != null ? ch.parent : null));
-    return { id, name, pid };
+    let clients = null;
+    if (ch.total_clients != null) clients = Number(ch.total_clients);
+    else if (ch.clients != null) clients = Number(ch.clients);
+    else if (ch.client_count != null) clients = Number(ch.client_count);
+    else if (ch.channel_clients != null) clients = Number(ch.channel_clients);
+    return { id, name, pid, clients };
   });
   const byId = {};
   norm.forEach((c) => { byId[c.id] = c; });
@@ -304,7 +310,50 @@ async function waitBotConnected(token, botId, tries = 30) {
 // ---------- 防重复连接（并发锁）+ 自动重连看门狗 ----------
 let linking = null;          // 串行化 link()，避免并发点击重复建 bot
 let desiredLinked = false;   // 用户意图：应保持连接（用于看门狗判断是否需自愈）
+let autoPausedByEmpty = false; // 因“频道无人”而自动暂停（用于有人进入时自动恢复）
 let watchdogTimer = null;
+
+// 取机器人所在频道的“在线客户端数”（含机器人自身）。依赖 ts6-manager 的频道列表。
+// 返回数字；无法判断（未配置频道/接口缺字段）时返回 null，调用方应忽略。
+async function getChannelClientCount() {
+  const c = cfg();
+  const path = (config.ts6mgrChannel || c.channel || '').trim();
+  if (!path) return null;
+  try {
+    const token = await getToken();
+    const serverConfigId = await ensureServer(token, c);
+    const channels = await getChannels(token, serverConfigId);
+    const ch = channels.find((x) => x.path === path) || channels.find((x) => x.name === path);
+    if (!ch) return null;
+    return ch.clients == null ? null : ch.clients;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 频道无人（仅机器人自身）时自动暂停；有人进入且此前是“因无人暂停”的，则自动恢复。
+async function maybeAutoPauseEmpty() {
+  if (process.env.AUTO_PAUSE_EMPTY === 'false') return;
+  const count = await getChannelClientCount();
+  if (count == null) return; // 无法判断则维持现状
+  const playing = !!player.get().playing;
+  if (count <= 1) {
+    // 频道内无人（total_clients 含机器人自身，仅机器人时=1；部分实现不含则=0）
+    if (playing && !autoPausedByEmpty) {
+      player.pause();
+      autoPausedByEmpty = true;
+      console.log('[tsbridge] 频道内无人，自动暂停播放');
+    }
+  } else {
+    // 有人进入频道
+    if (autoPausedByEmpty && !playing) {
+      player.resume();
+      resumeRadio().catch(() => {}); // 重新向 ts6-manager 下达 play-radio 保活
+      autoPausedByEmpty = false;
+      console.log('[tsbridge] 检测到有人进入频道，自动恢复播放');
+    }
+  }
+}
 
 // 周期性检查机器人在线状态：ts6-manager 在电台空（Queue empty）等情况会停止播放/断开，
 // 我们的 /api/stream 在队列空时持续输出静音，所以只需重新下达 play-radio 即可让它重新拉流、保持在线。
@@ -313,7 +362,11 @@ async function watchdogTick() {
   try {
     const st = await status();
     if (!st || !st.enabled) return;
-    if (st.connected) return; // 仍在线/播放/暂停，无需处理
+    if (st.connected) {
+      // 仍在线：检查频道是否有人，无人则自动暂停
+      await maybeAutoPauseEmpty();
+      return;
+    }
     console.log('[tsbridge] 检测到点歌机器人已断开/停止，自动重连恢复…');
     try { await link(); } catch (e) { console.log('[tsbridge] 自动重连失败: ' + (e && e.message)); }
   } catch (e) { /* 忽略本轮 */ }
