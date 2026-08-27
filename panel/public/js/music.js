@@ -647,7 +647,7 @@ TSPages.music = async function () {
     const body = document.getElementById('modal-body');
     body.innerHTML = `
       <div class="muted" style="font-size:12px;margin-bottom:8px">指令以 <code>!</code> 开头；需在面板「推流卡片 → 聊天设置」中开启对应权限。直接发送歌曲ID或网易云链接也可点歌。</div>
-      <div class="table-wrap">
+      <div class="table-wrap chat-help-table">
         <table>
           <thead><tr><th>指令</th><th>别名</th><th>示例</th><th>说明</th></tr></thead>
           <tbody>

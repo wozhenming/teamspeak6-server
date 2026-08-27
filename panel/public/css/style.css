@@ -400,7 +400,7 @@ td.actions .btn { margin-left: 6px; }
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: 460px;
+  width: min(720px, calc(100vw - 40px));
   max-width: calc(100vw - 40px);
   max-height: calc(100vh - 60px);
   overflow: auto;
@@ -410,6 +410,11 @@ td.actions .btn { margin-left: 6px; }
 .modal-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1; }
 .modal-body { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 4px; }
+
+/* 指令一览表格：允许换行，避免被 min-width:650px 撑出横向滚动 */
+.table-wrap.chat-help-table table { min-width: 0; }
+.table-wrap.chat-help-table th,
+.table-wrap.chat-help-table td { white-space: normal; word-break: break-word; }
 
 /* ---------- 频道树 ---------- */
 .channel-tree { font-size: 13.5px; }
