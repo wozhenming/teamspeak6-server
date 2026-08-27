@@ -131,6 +131,9 @@ function runControl(cmd, invokerName) {
       const r = player.next();
       const cur = r && r.current;
       reply(invokerName, cur ? '⏭ 已切歌：' + cur.title : '队列末尾/为空，无法继续切');
+      // 切歌后主动重新向 ts6-manager 下达 play-radio：即便它此前因流空档报
+      // “Queue empty” 停掉了点歌机器人，也能立即恢复拉流，避免掉线。
+      require('./tsbridge').resumeRadio().catch(() => {});
     }
   } catch (e) {
     reply(invokerName, '✖ 操作失败：' + e.message);
