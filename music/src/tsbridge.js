@@ -251,23 +251,30 @@ function pickBot(c, bots) {
 
 async function ensureBot(token, serverConfigId) {
   const c = cfg();
+  // TS 频道树用的是完整路径（如 "音乐厅/子频道"），而 ts6-manager 的 defaultChannel 匹配的是
+  // 频道“名称”（叶子）。取出叶子名，否则路径对不上、机器人进不了频道。
+  const chanName = (c.channel || '').split('/').pop().trim();
   let bots = [];
   try { bots = await getBots(token); } catch (e) { bots = []; }
   const existing = pickBot(c, bots);
   if (existing) {
-    // 尽力更新加入的频道（失败不阻断）
-    if (c.channel) {
-      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: c.channel }); } catch (e) { /* 忽略 */ }
+    let needRestart = false;
+    if (chanName) {
+      try {
+        const upd = await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: chanName });
+        if (upd.status === 200 || upd.status === 201) needRestart = true; // 频道可能变了 → 重连以进新频道
+        else console.log('[tsbridge] 更新机器人生效频道失败 HTTP ' + upd.status);
+      } catch (e) { /* 忽略 */ }
     }
     try { config.saveTsBridge({ ts6mgrBotId: String(existing.id) }); } catch (e) { /* 忽略 */ }
-    return existing.id;
+    return { id: existing.id, needRestart };
   }
   const name = '点歌机器人';
   const create = await authFetch('POST', '/api/music-bots', token, {
     name,
     serverConfigId,
     nickname: name,
-    defaultChannel: c.channel,
+    defaultChannel: chanName,
     volume: 50,
     autoStart: false,
   });
@@ -275,7 +282,7 @@ async function ensureBot(token, serverConfigId) {
     throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败'));
   }
   const bot = (create.json && (create.json.data || create.json));
-  return bot.id;
+  return { id: bot.id, needRestart: false };
 }
 
 // 等待 bot 真正连上 TS（start 是异步的，play-radio 要求已 connected）
@@ -298,10 +305,15 @@ async function link() {
   const c = cfg();
   const token = await getToken();
   const serverConfigId = await ensureServer(token, c);
-  const botId = await ensureBot(token, serverConfigId);
+  const { id: botId, needRestart } = await ensureBot(token, serverConfigId);
   const stationId = await ensureStation(token, serverConfigId);
 
-  await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+  if (needRestart) {
+    // 频道变更/复用机器人生效 → 重启使其断线并加入新频道
+    await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
+  } else {
+    await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+  }
   // 等 bot 连接上频道后再播放电台（避免 “Bot is not connected”）
   await waitBotConnected(token, botId);
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
