@@ -102,7 +102,7 @@ TSPages.channels = async function () {
       <div class="table-wrap"><table>
         <thead><tr><th>昵称</th><th>空闲</th></tr></thead>
         <tbody>${members.length ? members.map(m =>
-          `<tr><td>${TSUtils.escapeHtml(m.nickname)}</td><td>${TSUtils.fmtDuration(m.idle_seconds)}</td></tr>`).join('')
+          `<tr><td>${TSUtils.escapeHtml(m.nickname)}${m.is_query ? ' <span class="badge blue">Query</span>' : ''}</td><td>${m.is_query ? '-' : TSUtils.fmtDuration(m.idle_seconds)}</td></tr>`).join('')
           : '<tr><td colspan="2"><div class="empty">暂无用户</div></td></tr>'}</tbody>
       </table></div>
       <div class="modal-footer">

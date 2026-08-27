@@ -57,7 +57,7 @@ TSPages.users = async function () {
       <td>${TSUtils.escapeHtml(c.channel_name || '')}</td>
       <td>${TSUtils.escapeHtml(c.country || '-')}</td>
       <td>${TSUtils.fmtDuration(c.connected_seconds)}</td>
-      <td title="距上次活动的时间，用户说话/操作后会重新计时">${TSUtils.fmtDuration(c.idle_seconds)}</td>
+      <td title="距上次活动的时间，用户说话/操作后会重新计时">${c.is_query ? '-' : TSUtils.fmtDuration(c.idle_seconds)}</td>
       <td><span class="badge green">在线</span></td>
       <td class="actions">
         <button class="btn btn-sm" data-act="poke" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">Poke</button>

@@ -23,6 +23,8 @@ function sidOf(req) {
 
 function mapClient(c, info) {
   const clid = Number(c.clid);
+  // TS6 WebQuery 的时间字段（client_idle_time / connection_connected_time）单位为毫秒，需转秒
+  const toSec = (v) => (v == null || v === '' ? null : Math.max(0, Math.floor(Number(v) / 1000)));
   const rawIdle = (info && info.client_idle_time != null)
     ? info.client_idle_time
     : (c.client_idle_time != null ? c.client_idle_time : null);
@@ -36,8 +38,8 @@ function mapClient(c, info) {
     uid: c.client_unique_identifier || '',
     country: c.client_country || '',
     // TS6 查询接口不提供单用户 Ping（官方文档无此字段），故不返回
-    connected_seconds: smoothConnected(clid, rawConnected),
-    idle_seconds: smoothIdle(clid, rawIdle),
+    connected_seconds: smoothConnected(clid, toSec(rawConnected)),
+    idle_seconds: smoothIdle(clid, toSec(rawIdle)),
     away: c.client_away === 1 || c.client_away === '1',
     is_query: String(c.client_type) === '1',
   };

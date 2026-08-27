@@ -37,12 +37,26 @@ router.get('/', async (req, res, next) => {
   try {
     const sid = sidOf(req);
     const [rawChannels, clients] = await Promise.all([ts.channellist(sid), ts.clientlist(sid)]);
-    const channels = rawChannels.map(mapChannel);
+    // 频道在线人数：TS6 WebQuery 的 channellist 不一定回传 clients/total_clients，
+    // 直接按 clientlist 统计每个频道的客户端数最稳妥。
+    const countByCid = new Map();
+    for (const c of clients) {
+      const cid = Number(c.cid);
+      countByCid.set(cid, (countByCid.get(cid) || 0) + 1);
+    }
+    const channels = rawChannels.map(ch => {
+      const m = mapChannel(ch);
+      m.clients = countByCid.get(Number(ch.cid)) || 0;
+      m.total_clients = m.clients;
+      return m;
+    });
+    // TS6 的 client_idle_time 单位为毫秒，需转秒；并记录是否为 Query 客户端
     const mappedClients = clients.map(c => ({
       clid: Number(c.clid),
       cid: Number(c.cid),
       nickname: c.client_nickname || '?',
-      idle_seconds: smoothIdle(Number(c.clid), c.client_idle_time != null ? c.client_idle_time : null),
+      is_query: String(c.client_type) === '1',
+      idle_seconds: smoothIdle(Number(c.clid), c.client_idle_time != null ? Math.floor(Number(c.client_idle_time) / 1000) : null),
     }));
     res.json({ ok: true, data: { channels, clients: mappedClients } });
   } catch (err) {
