@@ -109,6 +109,7 @@ TSPages.music = async function () {
             <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="clear"> 清队列</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="search"> 搜索</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="queue"> 队列</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
           </div>
@@ -117,7 +118,7 @@ TSPages.music = async function () {
             <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
-          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code></div>
+          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code></div>
         </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
@@ -634,6 +635,7 @@ TSPages.music = async function () {
     { cmd: '!切歌', alias: '!下一首 · !next · !skip', ex: '!切歌', desc: '切到下一首' },
     { cmd: '!清队列', alias: '!清空队列 · !清队 · !清掉队列 · !clear', ex: '!清队列', desc: '清空点歌队列并停止播放' },
     { cmd: '!搜索', alias: '!搜 · !查找 · !找歌 · !find · !search', ex: '!搜索 周杰伦', desc: '搜索歌曲，返回前5首（歌名-歌手-ID）' },
+    { cmd: '!队列', alias: '!列表 · !q · !playlist · !待播', ex: '!队列 2', desc: '查看播放队列（每页10首，可翻页）' },
     { cmd: '!循环', alias: '!循环模式 · !loop · !cycle', ex: '!循环 列表', desc: '设置循环：列表 / 单曲 / 随机 / 关' },
     { cmd: '!状态', alias: '!now · !当前 · !playing · !正在播放', ex: '!状态', desc: '查看当前播放与队列' },
   ];

@@ -138,6 +138,8 @@ function runControl(cmd, invokerName, arg) {
       runClear(invokerName);
     } else if (cmd === 'search') {
       runSearch(arg || '', invokerName);
+    } else if (cmd === 'queue') {
+      runQueue(arg || '', invokerName);
     }
   } catch (e) {
     reply(invokerName, '✖ 操作失败：' + e.message);
@@ -153,6 +155,36 @@ function runClear(invokerName) {
   } catch (e) {
     reply(invokerName, '✖ 清空失败：' + e.message);
   }
+}
+
+// 查看播放队列（分页，每页最多 10 首）：!队列 [页码]
+function runQueue(arg, invokerName) {
+  const all = queue.all();
+  const total = all.length;
+  let page = parseInt((arg || '').trim(), 10);
+  if (!page || page < 1) page = 1;
+  const pageSize = 10;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (page > pages) page = pages;
+  const cur = player.get().current;
+  const curId = cur ? cur.id : null;
+  const start = (page - 1) * pageSize;
+  const slice = all.slice(start, start + pageSize);
+  if (!total) {
+    reply(invokerName, '队列为空，用 !点歌 <ID> 添加歌曲');
+    return;
+  }
+  const lines = slice.map((s, i) => {
+    const idx = start + i + 1;
+    const mark = (s.id === curId) ? '▶ ' : '  ';
+    const artists = s.artists ? ' - ' + s.artists : '';
+    return mark + idx + '. ' + s.title + artists;
+  });
+  let msg = '📜 播放队列（共 ' + total + ' 首，第 ' + page + '/' + pages + ' 页）\n' + lines.join('\n');
+  if (pages > 1) {
+    msg += '\n!队列 ' + (page < pages ? (page + 1) : 1) + ' 查看' + (page < pages ? '下一页' : '首页');
+  }
+  reply(invokerName, msg);
 }
 
 // 按关键词搜索歌曲，返回前 5 首：歌名 - 歌手（ID）
@@ -189,6 +221,7 @@ const CTRL_MAP = {
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
   clear: 'clear', 清队列: 'clear', 清空队列: 'clear', 清队: 'clear', 清掉队列: 'clear',
   search: 'search', 搜: 'search', 搜索: 'search', 查找: 'search', 找歌: 'search', find: 'search',
+  queue: 'queue', 队列: 'queue', 列表: 'queue', q: 'queue', playlist: 'queue', 待播: 'queue',
 };
 const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
 const LOOP_MODES = {
@@ -249,7 +282,7 @@ function runStatus(invokerName) {
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search' };
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -278,7 +311,7 @@ function handleRequest(rawText, invokerName) {
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !循环 · !状态');
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
