@@ -114,6 +114,7 @@ TSPages.music = async function () {
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
+            <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
           <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code></div>
@@ -624,6 +625,42 @@ TSPages.music = async function () {
       TSUtils.toast('保存失败：' + e.message, 'error');
     }
   };
+
+  // ---------- 聊天点歌指令一览（弹窗） ----------
+  const CHAT_CMD_HELP = [
+    { cmd: '!点歌', alias: '!点 · !dian · !song · !req · !点播', ex: '!点歌 2652820720', desc: '点播歌曲（歌曲ID或网易云分享链接）' },
+    { cmd: '!播放', alias: '!继续 · !resume · !play · !开始', ex: '!播放', desc: '开始 / 继续播放' },
+    { cmd: '!暂停', alias: '!pause', ex: '!暂停', desc: '暂停播放' },
+    { cmd: '!切歌', alias: '!下一首 · !next · !skip', ex: '!切歌', desc: '切到下一首' },
+    { cmd: '!清队列', alias: '!清空队列 · !清队 · !清掉队列 · !clear', ex: '!清队列', desc: '清空点歌队列并停止播放' },
+    { cmd: '!搜索', alias: '!搜 · !查找 · !找歌 · !find · !search', ex: '!搜索 周杰伦', desc: '搜索歌曲，返回前5首（歌名-歌手-ID）' },
+    { cmd: '!循环', alias: '!循环模式 · !loop · !cycle', ex: '!循环 列表', desc: '设置循环：列表 / 单曲 / 随机 / 关' },
+    { cmd: '!状态', alias: '!now · !当前 · !playing · !正在播放', ex: '!状态', desc: '查看当前播放与队列' },
+  ];
+  function showChatCmdHelp() {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '聊天点歌指令一览';
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">指令以 <code>!</code> 开头；需在面板「推流卡片 → 聊天设置」中开启对应权限。直接发送歌曲ID或网易云链接也可点歌。</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>指令</th><th>别名</th><th>示例</th><th>说明</th></tr></thead>
+          <tbody>
+            ${CHAT_CMD_HELP.map((r) => `<tr><td><code>${r.cmd}</code></td><td>${r.alias}</td><td><code>${r.ex}</code></td><td>${r.desc}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer"><button class="btn" id="chat-help-close">关闭</button></div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    document.getElementById('modal-close').onclick = close;
+    const closeBtn = document.getElementById('chat-help-close');
+    if (closeBtn) closeBtn.onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  }
+  $('btn-ts-chat-help').onclick = showChatCmdHelp;
+
   loadTsChannels();
   refreshTsStatus();
 
