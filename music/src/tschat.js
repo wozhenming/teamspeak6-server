@@ -165,6 +165,33 @@ function cmdEnabled(name, uid) {
   return true;                                  // 全局开且未对该用户配置 → 跟随全局
 }
 
+// 各指令的展示信息与别名（供 !帮助 与面板指南使用）
+const CMD_INFO = [
+  { key: 'dian', label: '点歌', desc: '按歌曲ID或网易云链接点歌', aliases: ['!点歌 <ID|链接>', '!点 <ID>', '裸ID/链接'] },
+  { key: 'play', label: '播放', desc: '开始/继续播放', aliases: ['!播放', '!继续', '!开始', '!play', '!resume'] },
+  { key: 'pause', label: '暂停', desc: '暂停播放', aliases: ['!暂停', '!pause'] },
+  { key: 'next', label: '切歌', desc: '下一首', aliases: ['!切歌', '!下一首', '!next', '!skip'] },
+  { key: 'loop', label: '循环', desc: '切换循环模式：列表/单曲/随机/关（不带参数则循环切换）', aliases: ['!循环 <模式>', '!循环模式', '!loop'] },
+  { key: 'status', label: '状态', desc: '查看正在播放/下一首/播放与循环状态', aliases: ['!状态', '!now', '!当前', '!playing'] },
+  { key: 'clear', label: '清队列', desc: '清空点歌队列', aliases: ['!清队列', '!清队', '!清空队列', '!clear'] },
+  { key: 'help', label: '帮助', desc: '列出当前用户可用的全部指令', aliases: ['!帮助', '!help', '!指令', '!?'] },
+];
+
+// 某用户当前可用的指令
+function availableCmds(uid) {
+  return CMD_INFO.filter((c) => cmdEnabled(c.key, uid)).map((c) => c.key);
+}
+
+// !帮助：列出该用户当前可用的全部指令（含别名）
+function runHelp(invokerName, uid) {
+  const on = CMD_INFO.filter((c) => cmdEnabled(c.key, uid));
+  if (!on.length) {
+    reply(invokerName, '你当前没有任何可用指令（可能被管理员禁用）');
+    return;
+  }
+  reply(invokerName, '可用指令：' + on.map((c) => c.aliases[0]).join(' · '));
+}
+
 function runLoop(arg, invokerName) {
   try {
     const a = (arg || '').trim().toLowerCase();
@@ -185,6 +212,7 @@ function runLoop(arg, invokerName) {
 // !状态：正在播放 / 下一首 / 播放与循环状态
 const STATUS_WORDS = { 状态: 1, now: 1, 当前: 1, playing: 1, 正在播放: 1 };
 const CLEAR_WORDS = { 清队列: 1, 清空队列: 1, 清队: 1, clear: 1 };
+const HELP_WORDS = { 帮助: 1, help: 1, 指令: 1, '?': 1 };
 function mm(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
 function runStatus(invokerName) {
   try {
@@ -251,12 +279,17 @@ function handleRequest(rawText, invokerName, invokerUid) {
       runClear(invokerName);
       return;
     }
+    if (HELP_WORDS[w]) {
+      if (!cmdEnabled('help', uid)) return reply(invokerName, '帮助指令已被禁用');
+      runHelp(invokerName, uid);
+      return;
+    }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
       if (!cmdEnabled('dian', uid)) return reply(invokerName, '点歌指令已被禁用');
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 · !播放 · !暂停 · !切歌 · !循环 · !状态 · !清队列');
+    reply(invokerName, '未知指令，输入 !帮助 查看可用指令');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
