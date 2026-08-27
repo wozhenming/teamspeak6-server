@@ -50,13 +50,17 @@ TSPages.users = async function () {
       return;
     }
 
-    // 昵称特殊标识：点歌机器人 / 点歌助手 / Query(serveradmin)
+    // 昵称特殊标识：查询客户端(点歌助手/Query)不可能被普通用户冒充（只能是系统创建的）；而普通语音用户可随意取名，
+    // 故“点歌机器人”只对语音客户端显示，且只能作辅助提示（真正的判定以 ts6-manager 的 UID 为主）。
     function nickBadge(c) {
       const n = c.nickname || '';
       const b = [];
-      if (n.includes('点歌机器人')) b.push('<span class="badge orange">点歌机器人</span>');
-      if (n.includes('点歌助手')) b.push('<span class="badge violet">点歌助手</span>');
-      if (c.is_query) b.push('<span class="badge blue">Query</span>');
+      if (c.is_query) {
+        if (n.includes('点歌助手')) b.push('<span class="badge violet">点歌助手</span>');
+        b.push('<span class="badge blue">Query</span>');
+      } else if (n.includes('点歌机器人')) {
+        b.push('<span class="badge orange">点歌机器人</span>');
+      }
       return b.join(' ');
     }
 

@@ -379,14 +379,15 @@ async function bootstrap() {
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
     let botCid = null;
-    let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+    let botSeen = items.some((x) => String(x.client_type) !== '1' && x.client_nickname && x.client_nickname.includes('点歌机器人'));
     if (wantName) {
       const ch = chItems.find((x) => (x.channel_name || '') === wantName);
       if (ch) botCid = ch.cid;
     }
     if (!botCid) {
-      const bot = items.find((x) => x.client_nickname === '点歌机器人')
-        || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+      // 只认语音客户端里的“点歌机器人”（普通用户能随意取名，但夹具以 UID 为准；此处仅作频道定位辅助）
+      const bot = items.find((x) => String(x.client_type) !== '1' && x.client_nickname === '点歌机器人')
+        || items.find((x) => String(x.client_type) !== '1' && x.client_nickname && x.client_nickname.includes('点歌机器人'));
       if (bot) botCid = bot.cid;
       botSeen = botSeen || !!bot;
     }
