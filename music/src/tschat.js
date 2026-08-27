@@ -474,10 +474,12 @@ function scheduleRetry() {
   retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 8000);
 }
 
+let lastError = '';
 function fail(err) {
   if (!started) { teardown(); return; }
   state = 'error';
-  console.log('[tschat] 断开：' + (err && err.message ? err.message : err));
+  lastError = (err && err.message) ? err.message : String(err);
+  console.log('[tschat] 断开：' + lastError);
   teardown();
   if (started && enabled()) scheduleRetry();
 }
@@ -538,7 +540,7 @@ module.exports = {
   stop,
   applyConfig,
   enabled,
-  getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword }),
+  getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword, error: lastError }),
   // 测试钩子（非公开接口）
   _internal: { extractSongId, parseParams, esc, unesc, handleRequest },
 };

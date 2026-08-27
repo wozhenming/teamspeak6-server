@@ -590,7 +590,7 @@ TSPages.music = async function () {
       const map = {
         listening: '监听中：在频道发送 !点歌 <ID|链接> 即可',
         connecting: '连接 TS 查询…',
-        error: '异常（自动重试中，检查密码/白名单）',
+        error: '异常（自动重试中）' + (s.error ? '：' + s.error : ''),
         stopped: '未启用',
       };
       $('ts-chat-state').textContent = map[s.state] || (s.enabled ? '待机' : '未启用');

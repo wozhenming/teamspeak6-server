@@ -260,11 +260,15 @@ async function ensureBot(token, serverConfigId) {
   if (existing) {
     let needRestart = false;
     if (chanName) {
-      try {
-        const upd = await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: chanName });
-        if (upd.status === 200 || upd.status === 201) needRestart = true; // 频道可能变了 → 重连以进新频道
-        else console.log('[tsbridge] 更新机器人生效频道失败 HTTP ' + upd.status);
-      } catch (e) { /* 忽略 */ }
+      // 仅当机器人当前生效频道与目标不同时才需要重启重连，否则避免无谓断开
+      const curChan = String(existing.defaultChannel || '').trim();
+      if (curChan !== chanName) {
+        try {
+          const upd = await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: chanName });
+          if (upd.status === 200 || upd.status === 201) needRestart = true;
+          else console.log('[tsbridge] 更新机器人生效频道失败 HTTP ' + upd.status);
+        } catch (e) { /* 忽略 */ }
+      }
     }
     try { config.saveTsBridge({ ts6mgrBotId: String(existing.id) }); } catch (e) { /* 忽略 */ }
     return { id: existing.id, needRestart };
@@ -309,8 +313,12 @@ async function link() {
   const stationId = await ensureStation(token, serverConfigId);
 
   if (needRestart) {
-    // 频道变更/复用机器人生效 → 重启使其断线并加入新频道
-    await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
+    // 频道变更/复用机器人生效 → 重启使其断线并加入新频道；若重启失败则退化为 stop+start
+    const rst = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
+    if (rst.status !== 200) {
+      try { await authFetch('POST', '/api/music-bots/' + botId + '/stop', token); } catch (e) {}
+      await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+    }
   } else {
     await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
   }
