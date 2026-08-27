@@ -26,6 +26,8 @@ const player = require('./player');
 let conn = null;          // 当前 ssh 连接
 let stream = null;        // shell 数据流
 let retryTimer = null;
+let keepTimer = null;     // 会话保活定时器
+let retryDelay = 5000;    // 断线重试，指数退避最大 60s
 let started = false;
 let state = 'stopped';    // stopped | connecting | listening | error
 
@@ -400,8 +402,9 @@ function connect() {
     port,
     username: 'serveradmin',
     password: config.tsQueryAdminPassword,
-    readyTimeout: 8000,
-    keepaliveInterval: 30000,
+    readyTimeout: 10000,
+    keepaliveInterval: 15000,
+    keepaliveCountMax: 4,
   });
 }
 
@@ -466,6 +469,10 @@ async function bootstrap() {
     if (!bot) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     bootstrapped = true;
     state = 'listening';
+    retryDelay = 5000; // 连接成功，重置退避
+    // 每 25s 发一次 version 保活，防止 SSH 查询会话因空闲被 TS 关闭
+    if (keepTimer) { clearInterval(keepTimer); keepTimer = null; }
+    keepTimer = setInterval(() => { cmd('version').catch(() => {}); }, 25000);
     console.log('[tschat] 已加入频道并监听 !点歌 命令 (clid=' + myClid + ', cid=' + (botCid || myCid || '?') + ', 昵称=' + nick + ')');
   } catch (e) {
     fail(e);
@@ -474,7 +481,10 @@ async function bootstrap() {
 
 function scheduleRetry() {
   if (retryTimer) return;
-  retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 8000);
+  // 指数退避：5s→10s→...→60s 封顶，避免过密重连触发 TS 会话/洪水限制
+  const delay = retryDelay;
+  retryDelay = Math.min(retryDelay * 2, 60000);
+  retryTimer = setTimeout(() => { retryTimer = null; connect(); }, delay);
 }
 
 let lastError = '';
@@ -496,6 +506,7 @@ function stop() {
 }
 
 function teardown() {
+  if (keepTimer) { clearInterval(keepTimer); keepTimer = null; }
   while (pending.length) {
     const p = pending.shift();
     clearTimeout(p.timer);
