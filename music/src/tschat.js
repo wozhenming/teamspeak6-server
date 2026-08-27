@@ -184,6 +184,7 @@ function runLoop(arg, invokerName) {
 
 // !状态：正在播放 / 下一首 / 播放与循环状态
 const STATUS_WORDS = { 状态: 1, now: 1, 当前: 1, playing: 1, 正在播放: 1 };
+const CLEAR_WORDS = { 清队列: 1, 清空队列: 1, 清队: 1, clear: 1 };
 function mm(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
 function runStatus(invokerName) {
   try {
@@ -206,6 +207,17 @@ function runStatus(invokerName) {
       '｜队列：' + all.length + ' 首');
   } catch (e) {
     reply(invokerName, '✖ 状态查询失败：' + e.message);
+  }
+}
+
+// !清队列：清空点歌队列（并停止播放）
+function runClear(invokerName) {
+  try {
+    const n = queue.all().length;
+    queue.clear();
+    reply(invokerName, n ? ('🧹 已清空点歌队列（' + n + ' 首）') : '队列本来就是空的');
+  } catch (e) {
+    reply(invokerName, '✖ 清空失败：' + e.message);
   }
 }
 
@@ -234,12 +246,17 @@ function handleRequest(rawText, invokerName, invokerUid) {
       runStatus(invokerName);
       return;
     }
+    if (CLEAR_WORDS[w]) {
+      if (!cmdEnabled('clear', uid)) return reply(invokerName, '清空队列指令已被禁用');
+      runClear(invokerName);
+      return;
+    }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
       if (!cmdEnabled('dian', uid)) return reply(invokerName, '点歌指令已被禁用');
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !循环 · !状态');
+    reply(invokerName, '可用指令：!点歌 · !播放 · !暂停 · !切歌 · !循环 · !状态 · !清队列');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）

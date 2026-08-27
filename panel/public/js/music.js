@@ -109,9 +109,11 @@ TSPages.music = async function () {
             <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="clear"> 清队列</label>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
+            <button class="btn btn-sm" id="btn-ts-guide">指令指南</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
           <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code></div>
@@ -621,6 +623,33 @@ TSPages.music = async function () {
     } catch (e) {
       TSUtils.toast('保存失败：' + e.message, 'error');
     }
+  };
+
+  // ---------- 指令指南弹窗 ----------
+  $('btn-ts-guide').onclick = () => {
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '频道聊天点歌指令指南';
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">在点歌机器人所在频道的「频道聊天」或私聊「点歌助手」发送：</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>指令</th><th>示例</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>!点歌</code></td><td><code>!点歌 2652820720</code></td><td>按歌曲ID点歌</td></tr>
+          <tr><td><code>!点歌</code></td><td><code>!点歌 https://music.163.com/song?id=2652820720</code></td><td>按网易云链接点歌</td></tr>
+          <tr><td><code>!点歌</code></td><td><code>2652820720</code> / 直接发链接</td><td>裸 ID/链接也可（无需前缀）</td></tr>
+          <tr><td><code>!播放</code></td><td><code>!播放</code></td><td>开始/继续播放（别名 !继续 !开始 !play）</td></tr>
+          <tr><td><code>!暂停</code></td><td><code>!暂停</code></td><td>暂停（!pause）</td></tr>
+          <tr><td><code>!切歌</code></td><td><code>!切歌</code></td><td>下一首（!下一首 !next）</td></tr>
+          <tr><td><code>!循环</code></td><td><code>!循环 随机</code></td><td>设循环：列表/单曲/随机/关；不开参数则循环切换</td></tr>
+          <tr><td><code>!状态</code></td><td><code>!状态</code></td><td>查看正在播放/下一首/播放与循环状态</td></tr>
+          <tr><td><code>!清队列</code></td><td><code>!清队列</code></td><td>清空点歌队列（!clear）</td></tr>
+        </tbody></table></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">各指令是否可用，受「点歌页全局开关」与「用户管理里的每用户权限」共同控制（全局优先）。</div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    document.getElementById('modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
   };
   loadTsChannels();
   refreshTsStatus();
