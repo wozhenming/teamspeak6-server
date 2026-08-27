@@ -116,7 +116,7 @@ async function addSong(body, invokerName) {
   }
 }
 
-function runControl(cmd, invokerName) {
+function runControl(cmd, invokerName, arg) {
   try {
     const st = player.get();
     if (cmd === 'play') {
@@ -136,6 +136,8 @@ function runControl(cmd, invokerName) {
       require('./tsbridge').resumeRadio().catch(() => {});
     } else if (cmd === 'clear') {
       runClear(invokerName);
+    } else if (cmd === 'search') {
+      runSearch(arg || '', invokerName);
     }
   } catch (e) {
     reply(invokerName, '✖ 操作失败：' + e.message);
@@ -153,12 +155,40 @@ function runClear(invokerName) {
   }
 }
 
-// 命令分发：!点歌/!点 <ID|链接> · !播放/!继续/!pause · !暂停 · !切歌/!下一首/!next · !清队列
+// 按关键词搜索歌曲，返回前 5 首：歌名 - 歌手（ID）
+function runSearch(keyword, invokerName) {
+  keyword = (keyword || '').trim();
+  if (!keyword) {
+    reply(invokerName, '用法：!搜索 <歌曲名/关键字>，例如 !搜索 周杰伦');
+    return;
+  }
+  // 异步执行，避免阻塞命令分发
+  (async () => {
+    try {
+      const result = await enhanced.search(keyword, 'song', 5, 0);
+      const songs = (result && result.songs) || [];
+      if (!songs.length) {
+        reply(invokerName, '未找到与「' + keyword + '」相关的歌曲');
+        return;
+      }
+      const lines = songs.slice(0, 5).map((s, i) => {
+        const artists = Array.isArray(s.artists) ? s.artists.map((a) => a.name).join('/') : (s.artist || '');
+        return (i + 1) + '. ' + s.name + (artists ? ' - ' + artists : '') + '  (ID:' + s.id + ')';
+      });
+      reply(invokerName, '🔍 搜索「' + keyword + '」前 ' + lines.length + ' 首：\n' + lines.join('\n') + '\n用 !点歌 <ID> 点播');
+    } catch (e) {
+      reply(invokerName, '✖ 搜索失败：' + e.message);
+    }
+  })();
+}
+
+// 命令分发：!点歌/!点 <ID|链接> · !播放/!继续/!pause · !暂停 · !切歌/!下一首/!next · !清队列 · !搜索 <关键词>
 const CTRL_MAP = {
   play: 'play', resume: 'play', 继续: 'play', 播放: 'play', 开始: 'play',
   pause: 'pause', 暂停: 'pause',
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
   clear: 'clear', 清队列: 'clear', 清空队列: 'clear', 清队: 'clear', 清掉队列: 'clear',
+  search: 'search', 搜: 'search', 搜索: 'search', 查找: 'search', 找歌: 'search', find: 'search',
 };
 const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
 const LOOP_MODES = {
@@ -219,7 +249,7 @@ function runStatus(invokerName) {
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear' };
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -230,7 +260,7 @@ function handleRequest(rawText, invokerName) {
     if (CTRL_MAP[w]) {
       const name = CMD_NAME[CTRL_MAP[w]];
       if (!cmdEnabled(name)) return reply(invokerName, '该指令已被管理员禁用');
-      runControl(CTRL_MAP[w], invokerName);
+      runControl(CTRL_MAP[w], invokerName, rest);
       return;
     }
     if (LOOP_WORDS[w]) {
@@ -248,7 +278,7 @@ function handleRequest(rawText, invokerName) {
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !循环 · !状态');
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
