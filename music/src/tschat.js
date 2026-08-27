@@ -178,7 +178,8 @@ function runQueue(arg, invokerName) {
     const idx = start + i + 1;
     const mark = (s.id === curId) ? '▶ ' : '  ';
     const artists = s.artists ? ' - ' + s.artists : '';
-    return mark + idx + '. ' + s.title + artists;
+    const sid = s.songId || s.id;
+    return mark + idx + '. ' + s.title + artists + '  (ID:' + sid + ')';
   });
   let msg = '📜 播放队列（共 ' + total + ' 首，第 ' + page + '/' + pages + ' 页）\n' + lines.join('\n');
   if (pages > 1) {
