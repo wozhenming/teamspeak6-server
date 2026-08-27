@@ -244,9 +244,13 @@ function pickBot(c, bots) {
     const byId = bots.find((b) => b && b.id === c.botId);
     if (byId) return byId;
   }
-  return bots.find((b) => b && b.name === '点歌机器人')
-    || bots.find((b) => b && b.nickname === '点歌机器人')
-    || null;
+  // 精确匹配
+  const byExact = bots.find((b) => b && (b.name === '点歌机器人' || b.nickname === '点歌机器人'));
+  if (byExact) return byExact;
+  // 模糊兜底：ts6-manager 可能把名字放在别的字段或带前后缀（如 “点歌机器人#1”）
+  return bots.find((b) =>
+    b && (((b.name || '').includes('点歌机器人')) || ((b.nickname || '').includes('点歌机器人')))
+  ) || null;
 }
 
 async function ensureBot(token, serverConfigId) {
@@ -275,6 +279,8 @@ async function ensureBot(token, serverConfigId) {
     throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败'));
   }
   const bot = (create.json && (create.json.data || create.json));
+  // 立即持久化 botId：即使后续 play-radio 失败，下次也不会重复新建机器人
+  try { config.saveTsBridge({ ts6mgrBotId: String(bot.id), ts6mgrChannel: c.channel }); } catch (e) { /* 忽略 */ }
   return bot.id;
 }
 
@@ -294,7 +300,35 @@ async function waitBotConnected(token, botId, tries = 30) {
   return false;
 }
 
-async function link() {
+// ---------- 防重复连接（并发锁）+ 自动重连看门狗 ----------
+let linking = null;          // 串行化 link()，避免并发点击重复建 bot
+let desiredLinked = false;   // 用户意图：应保持连接（用于看门狗判断是否需自愈）
+let watchdogTimer = null;
+
+// 周期性检查机器人在线状态：ts6-manager 在电台空（Queue empty）等情况会停止播放/断开，
+// 我们的 /api/stream 在队列空时持续输出静音，所以只需重新下达 play-radio 即可让它重新拉流、保持在线。
+async function watchdogTick() {
+  if (!desiredLinked) return;
+  try {
+    const st = await status();
+    if (!st || !st.enabled) return;
+    if (st.connected) return; // 仍在线/播放/暂停，无需处理
+    console.log('[tsbridge] 检测到点歌机器人已断开/停止，自动重连恢复…');
+    try { await link(); } catch (e) { console.log('[tsbridge] 自动重连失败: ' + (e && e.message)); }
+  } catch (e) { /* 忽略本轮 */ }
+}
+
+function startWatchdog() {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(watchdogTick, 15000);
+  if (watchdogTimer.unref) watchdogTimer.unref();
+}
+function stopWatchdog() {
+  if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
+  desiredLinked = false;
+}
+
+async function linkImpl() {
   const c = cfg();
   const token = await getToken();
   const serverConfigId = await ensureServer(token, c);
@@ -313,7 +347,23 @@ async function link() {
   return { ok: true, botId, stationId, serverConfigId };
 }
 
+async function link() {
+  if (linking) return linking;            // 并发点击：复用同一连接过程，杜绝重复建 bot
+  linking = (async () => {
+    try {
+      const r = await linkImpl();
+      desiredLinked = true;
+      startWatchdog();
+      return r;
+    } finally {
+      linking = null;
+    }
+  })();
+  return linking;
+}
+
 async function unlink() {
+  stopWatchdog();
   const c = cfg();
   const token = await getToken();
   const bots = await getBots(token);
@@ -373,3 +423,6 @@ async function resumeRadio() {
 }
 
 module.exports = { link, unlink, status, cfg, listChannels, resumeRadio };
+
+// 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
+if (config.ts6mgrBotId) startWatchdog();
