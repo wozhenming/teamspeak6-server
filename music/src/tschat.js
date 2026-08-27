@@ -301,7 +301,10 @@ function handleRequest(rawText, invokerName, invokerUid) {
 
 // 向频道回执（targetmode=2 为频道聊天）
 function reply(invokerName, msg) {
-  cmd('sendtextmessage targetmode=2 msg=' + esc('[点歌] ' + msg)).catch(() => {});
+  if (!stream) { console.log('[tschat] 回执丢弃(无连接)'); return; }
+  cmd('sendtextmessage targetmode=2 msg=' + esc('[点歌] ' + msg))
+    .then(() => console.log('[tschat] 回执已发送'))
+    .catch((e) => console.log('[tschat] 回执失败：' + ((e && e.message) || e)));
 }
 
 // ---------- 单一分发器：所有行经此路由（通知 / 命令应答） ----------
