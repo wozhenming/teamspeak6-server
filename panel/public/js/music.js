@@ -15,6 +15,7 @@ TSPages.music = async function () {
   let searchQ = '';
   let searchPage = 1;
   const searchPageSize = 20;
+  let searchResults = []; // 当前页搜索结果（点歌按钮按索引引用，避免把 JSON 塞进 HTML 属性导致引号/单引号断裂）
 
   // 队列分页/筛选状态
   let queueQ = '';
@@ -375,12 +376,13 @@ TSPages.music = async function () {
             </td>
           </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       } else {
+        searchResults = d.items || [];
         box.innerHTML = `<div style="font-size:12px" class="muted">共 ${fmtNum(d.total)} 首</div><div class="table-wrap"><table>
           <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
-       <tbody>${d.items.map(s => `<tr>
+       <tbody>${searchResults.map((s, i) => `<tr>
              <td class="song-cell">${thumb(s.cover)}<span>${esc(s.name)}${feeBadge(s.fee, s.noCopyright)} <span class="muted">- ${esc(s.artists)}</span></span></td>
              <td>${esc(s.album)}</td><td class="num">${fmtDur(s.duration)}</td>
-            <td class="actions"><button class="btn btn-sm btn-primary" data-song='${JSON.stringify({ id: s.id, name: s.name, artists: s.artists, album: s.album, duration: s.duration, cover: s.cover, fee: s.fee }).replace(/"/g, '&quot;')}'>点歌</button></td>
+            <td class="actions"><button class="btn btn-sm btn-primary" data-i="${i}">点歌</button></td>
            </tr>`).join('')}</tbody></table></div>${pager(searchPage, pages, (p) => doSearch(p))}`;
       }
     } catch (e) {
@@ -671,8 +673,9 @@ TSPages.music = async function () {
     const btn = e.target.closest('button');
     if (!btn) return;
     try {
-      if (btn.dataset.song) {
-        const s = JSON.parse(btn.dataset.song);
+      if (btn.dataset.i != null) {
+        const s = searchResults[Number(btn.dataset.i)];
+        if (!s) { TSUtils.toast('结果已过期，请重新搜索', 'error'); return; }
         await API.musicEnqueue(s);
         TSUtils.toast('已加入点歌队列', 'success');
         refreshQueue();
