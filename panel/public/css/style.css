@@ -356,6 +356,8 @@ td.actions .btn { margin-left: 6px; }
 .badge.yellow { color: var(--yellow); border-color: var(--yellow); }
 .badge.red { color: var(--red); border-color: var(--red); }
 .badge.blue { color: var(--accent); border-color: var(--accent); }
+.badge.orange { color: #e67e22; border-color: #e67e22; }
+.badge.violet { color: #9b59b6; border-color: #9b59b6; }
 
 /* ---------- 登录页 ---------- */
 .login-body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }

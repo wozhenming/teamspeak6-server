@@ -50,9 +50,19 @@ TSPages.users = async function () {
       return;
     }
 
+    // 昵称特殊标识：点歌机器人 / 点歌助手 / Query(serveradmin)
+    function nickBadge(c) {
+      const n = c.nickname || '';
+      const b = [];
+      if (n.includes('点歌机器人')) b.push('<span class="badge orange">点歌机器人</span>');
+      if (n.includes('点歌助手')) b.push('<span class="badge violet">点歌助手</span>');
+      if (c.is_query) b.push('<span class="badge blue">Query</span>');
+      return b.join(' ');
+    }
+
     // 在线用户（可操作）
     const onlineRows = online.map(c => `<tr class="user-online">
-      <td>${TSUtils.escapeHtml(c.nickname)}${c.is_query ? ' <span class="badge blue">Query</span>' : ''}</td>
+      <td>${TSUtils.escapeHtml(c.nickname)} ${nickBadge(c)}</td>
       <td class="mono muted" title="${TSUtils.escapeHtml(c.uid || '')}">${TSUtils.escapeHtml((c.uid || '-').slice(0, 12))}…</td>
       <td>${TSUtils.escapeHtml(c.channel_name || '')}</td>
       <td>${TSUtils.escapeHtml(c.country || '-')}</td>
