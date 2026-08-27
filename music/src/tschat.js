@@ -153,7 +153,12 @@ const LOOP_MODES = {
 const LOOP_LABEL = { all: '列表循环', one: '单曲循环', shuffle: '随机播放', off: '顺序播放' };
 
 // 指令是否被面板允许
-function cmdEnabled(name) {
+// 指令是否可用：优先看该用户的配置（用户管理里设置），未配置才回退到全局 chatCommands
+function cmdEnabled(name, uid) {
+  if (uid) {
+    const up = (config.chatUserPermissions || {})[uid];
+    if (Array.isArray(up)) return up.includes(name); // 空数组=该用户全部禁用
+  }
   const cmds = (config.chatCommands || {});
   return cmds[name] !== false;
 }
@@ -203,31 +208,32 @@ function runStatus(invokerName) {
 }
 
 const CMD_NAME = { play: 'play', pause: 'pause', next: 'next' };
-function handleRequest(rawText, invokerName) {
+function handleRequest(rawText, invokerName, invokerUid) {
   const text = (rawText || '').trim();
   if (!text) return;
+  const uid = invokerUid || '';
   const ctl = text.match(/^!\s*(\S+)\s*(.*)$/);
   if (ctl) {
     const w = ctl[1].toLowerCase();
     const rest = ctl[2].trim();
     if (CTRL_MAP[w]) {
       const name = CMD_NAME[CTRL_MAP[w]];
-      if (!cmdEnabled(name)) return reply(invokerName, '该指令已被管理员禁用');
+      if (!cmdEnabled(name, uid)) return reply(invokerName, '该指令已被禁用');
       runControl(CTRL_MAP[w], invokerName);
       return;
     }
     if (LOOP_WORDS[w]) {
-      if (!cmdEnabled('loop')) return reply(invokerName, '循环指令已被管理员禁用');
+      if (!cmdEnabled('loop', uid)) return reply(invokerName, '循环指令已被禁用');
       runLoop(rest, invokerName);
       return;
     }
     if (STATUS_WORDS[w]) {
-      if (!cmdEnabled('status')) return reply(invokerName, '状态指令已被管理员禁用');
+      if (!cmdEnabled('status', uid)) return reply(invokerName, '状态指令已被禁用');
       runStatus(invokerName);
       return;
     }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
-      if (!cmdEnabled('dian')) return reply(invokerName, '点歌指令已被管理员禁用');
+      if (!cmdEnabled('dian', uid)) return reply(invokerName, '点歌指令已被禁用');
       addSong(rest, invokerName);
       return;
     }
@@ -236,7 +242,7 @@ function handleRequest(rawText, invokerName) {
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
   if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) {
-    if (!cmdEnabled('dian')) return;
+    if (!cmdEnabled('dian', uid)) return;
     addSong(text, invokerName);
   }
 }
@@ -254,7 +260,7 @@ function dispatchLine(line) {
     const p = parseParams(line);
     console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' msg=' + String(p.msg || '').slice(0, 80));
     const uid = p.invokeruid || '';
-    if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?');
+    if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?', uid);
     return;
   }
   const head = pending[0];

@@ -332,6 +332,24 @@ app.put('/api/ts-bot/config', (req, res) => {
 app.get('/api/ts-bot/chat/status', (req, res) => {
   ok(res, tschat.getState());
 });
+
+// 用户级指令权限：GET 返回 全局(chastCommands) + 每用户(chatUserPermissions)
+app.get('/api/ts-bot/chat/permissions', (req, res) => {
+  ok(res, { chatCommands: config.chatCommands, chatUserPermissions: config.chatUserPermissions || {} });
+});
+// 设置某用户的指令权限：body={ uid, allowed:[...] } 或 { uid, useGlobal:true }（清除该用户配置）
+app.put('/api/ts-bot/chat/permissions', (req, res) => {
+  try {
+    const body = req.body || {};
+    const uid = String(body.uid || '').trim();
+    if (!uid) return fail(res, 400, 'BAD_REQUEST', '缺少 uid');
+    const perms = Object.assign({}, config.chatUserPermissions || {});
+    if (body.useGlobal) delete perms[uid];
+    else perms[uid] = Array.isArray(body.allowed) ? body.allowed.filter(Boolean) : [];
+    config.saveTsBridge({ chatUserPermissions: perms });
+    ok(res, { chatUserPermissions: config.chatUserPermissions, uid });
+  } catch (e) { fail(res, 500, 'PERM_FAIL', e.message); }
+});
 app.post('/api/ts-bot/link', async (req, res) => {
   try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
 });

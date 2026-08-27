@@ -60,6 +60,7 @@ TSPages.users = async function () {
       <td title="距上次活动的时间，用户说话/操作后会重新计时">${TSUtils.fmtDuration(c.idle_seconds)}</td>
       <td><span class="badge green">在线</span></td>
       <td class="actions">
+        <button class="btn btn-sm" data-act="songperm" data-clid="${c.clid}" data-uid="${TSUtils.escapeHtml(c.uid || '')}" data-name="${TSUtils.escapeHtml(c.nickname)}">点歌权限</button>
         <button class="btn btn-sm" data-act="poke" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">Poke</button>
         <button class="btn btn-sm" data-act="msg" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">私聊</button>
         <button class="btn btn-sm" data-act="move" data-clid="${c.clid}" data-name="${TSUtils.escapeHtml(c.nickname)}">移动</button>
@@ -117,15 +118,65 @@ TSPages.users = async function () {
   }
 
   const channels = await API.channels(sid);
+  const perms = await API.musicTsChatPerms().catch(() => ({ chatCommands: {}, chatUserPermissions: {} }));
+
+  // 指令定义（name -> 全局开关）
+  const CMD_LABELS = [['dian', '点歌'], ['play', '播放'], ['pause', '暂停'], ['next', '切歌'], ['loop', '循环'], ['status', '状态']];
+  const GLOBAL = perms.chatCommands || {};
+
+  // 点歌权限弹窗：勾选该用户允许的指令（空 = 完全不勾 = 该用户全部禁用；全不勾选时跟随全局）
+  async function songPermModal(uid, name) {
+    const cur = (perms.chatUserPermissions || {})[uid];
+    const usingGlobal = !Array.isArray(cur);
+    const defaultCheck = usingGlobal ? CMD_LABELS.map(([k]) => GLOBAL[k] !== false) : CMD_LABELS.map(([k]) => cur.includes(k));
+    const overlay = document.getElementById('modal-overlay');
+    document.getElementById('modal-title').textContent = '点歌指令权限：' + name;
+    const body = document.getElementById('modal-body');
+    body.innerHTML = `
+      <div class="muted" style="font-size:12px;margin-bottom:8px">勾选 = 该用户可用的指令；不勾 = 禁用。也可“跟随全局”（用点歌页的全局设置）。</div>
+      ${CMD_LABELS.map(([k, label], i) => `
+        <label class="ts-toggle" style="margin-bottom:2px">
+          <input type="checkbox" data-cmd="${k}" ${defaultCheck[i] ? 'checked' : ''}> ${label}
+        </label>`).join('')}
+      <div class="modal-footer">
+        <button class="btn" id="f-cancel">取消</button>
+        <button class="btn" id="f-global">跟随全局</button>
+        <button class="btn btn-primary" id="f-ok">保存</button>
+      </div>`;
+    overlay.hidden = false;
+    const close = () => { overlay.hidden = true; };
+    body.querySelector('#f-cancel').onclick = close;
+    document.getElementById('modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+    body.querySelector('#f-global').onclick = async () => {
+      await API.musicTsChatPermReset(uid);
+      perms.chatUserPermissions = perms.chatUserPermissions || {};
+      delete perms.chatUserPermissions[uid];
+      close();
+      TSUtils.toast(uid ? `${name} 已恢复为跟随全局` : '', 'success');
+    };
+    body.querySelector('#f-ok').onclick = async () => {
+      const allowed = Array.from(body.querySelectorAll('input[data-cmd]')).filter(i => i.checked).map(i => i.dataset.cmd);
+      await API.musicTsChatPermSet(uid, allowed);
+      perms.chatUserPermissions = perms.chatUserPermissions || {};
+      perms.chatUserPermissions[uid] = allowed;
+      close();
+      TSUtils.toast(`已保存 ${name} 的点歌权限`, 'success');
+    };
+  }
 
   content.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
-    const { act, clid, name } = btn.dataset;
+    const { act, clid, name, uid } = btn.dataset;
     // 操作成功后自动刷新列表
     const c = async (title, fields, onOk) => modalForm(title, fields, async (v) => { await onOk(v); load(); });
 
     switch (act) {
+      case 'songperm':
+        if (!uid) { TSUtils.toast('该用户缺少 UID，无法配置点歌权限', 'error'); break; }
+        songPermModal(uid, name);
+        break;
       case 'poke':
         c(`Poke ${name}`, [{ key: 'msg', label: 'Poke 消息', type: 'textarea' }], async (v) => {
           if (!v.msg) throw new Error('请输入 Poke 消息');

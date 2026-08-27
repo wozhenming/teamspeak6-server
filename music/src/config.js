@@ -57,6 +57,8 @@ const config = {
     : true,
   // 聊天点歌可用指令（面板管理哪些可用）：点歌/播放/暂停/切歌/循环
   chatCommands: Object.assign({}, CHAT_CMD_DEFAULT),
+  // 用户级指令权限覆盖：{ [TS客户端UID]: ['dian','play',...] }；某用户未配置时回退到上面的全局 chatCommands
+  chatUserPermissions: {},
 };
 
 // 持久化桥接配置（面板可编辑，覆盖上面的环境变量）。空串不覆盖默认值。
@@ -76,6 +78,9 @@ function loadTsBridge() {
     if (o.tsChatEnabled != null) config.tsChatEnabled = !!o.tsChatEnabled;
     if (o.chatCommands && typeof o.chatCommands === 'object') {
       config.chatCommands = Object.assign({}, CHAT_CMD_DEFAULT, o.chatCommands);
+    }
+    if (o.chatUserPermissions && typeof o.chatUserPermissions === 'object') {
+      config.chatUserPermissions = o.chatUserPermissions;
     }
     if (o.streamTokenEnabled != null) config.streamTokenEnabled = !!o.streamTokenEnabled;
     if (o.streamToken) config.streamToken = o.streamToken;
@@ -98,6 +103,9 @@ config.saveTsBridge = (o) => {
       (o.chatCommands && typeof o.chatCommands === 'object') ? o.chatCommands : (config.chatCommands || {})),
     streamTokenEnabled: o.streamTokenEnabled != null ? !!o.streamTokenEnabled : (config.streamTokenEnabled !== false),
     streamToken: (o.streamToken || '').trim() || config.streamToken,
+    chatUserPermissions: (o.chatUserPermissions && typeof o.chatUserPermissions === 'object')
+      ? o.chatUserPermissions
+      : (config.chatUserPermissions || {}),
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }
