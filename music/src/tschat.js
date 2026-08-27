@@ -47,7 +47,7 @@ function esc(v) {
     .replace(/ /g, '\\s')
     .replace(/\|/g, '\\p')
     .replace(/\r/g, '')
-    .replace(/\n/g, '');
+    .replace(/\n/g, '\\n');
 }
 function unesc(v) {
   return String(v)
