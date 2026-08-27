@@ -612,40 +612,8 @@ queue.load();
 player.load();
 queue.onChange(player.onQueueChanged);
 
-// ---------- 自动解析电台流对外地址 ----------
-// ts6-manager 的 SSRF 防护会拒绝内网主机名（如 music），故电台 URL 必须是“对 ts6-manager
-// 可达且非内网”的地址。优先用显式配置，否则启动时自动探测本机公网 IP。
-async function resolveStreamPublicUrl() {
-  const streamPort = process.env.MUSIC_STREAM_PORT || '3200';
-  const explicit = process.env.STREAM_PUBLIC_URL || process.env.STREAM_PUBLIC_HOST;
-  if (process.env.STREAM_PUBLIC_URL) {
-    config.streamPublicUrl = process.env.STREAM_PUBLIC_URL;
-    console.log('[music-bot] 电台流对外地址(显式):', config.streamPublicUrl);
-    return;
-  }
-  if (process.env.STREAM_PUBLIC_HOST) {
-    config.streamPublicUrl = `http://${process.env.STREAM_PUBLIC_HOST}:${streamPort}/api/stream`;
-    console.log('[music-bot] 电台流对外地址(STREAM_PUBLIC_HOST):', config.streamPublicUrl);
-    return;
-  }
-  // 自动探测公网 IP（多个服务兜底）
-  const services = ['https://api.ipify.org', 'https://ifconfig.me/ip', 'https://icanhazip.com', 'https://myip.dnsomatic.com'];
-  for (const s of services) {
-    try {
-      const r = await fetch(s, { signal: AbortSignal.timeout(3000) });
-      if (!r.ok) continue;
-      const ip = (await r.text()).trim();
-      if (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
-        config.streamPublicUrl = `http://${ip}:${streamPort}/api/stream`;
-        console.log('[music-bot] 电台流对外地址(自动探测公网 IP):', config.streamPublicUrl);
-        return;
-      }
-    } catch (e) { /* 尝试下一个 */ }
-  }
-  // 兜底：仍用内网主机名（可能在 ts6-manager 侧被拦，仅作降级）
-  config.streamPublicUrl = `http://music:${streamPort}/api/stream`;
-  console.log('[music-bot] 警告：未能自动获取公网 IP，回退到内网地址', config.streamPublicUrl, '（ts6-manager 可能拒绝，建议设置 STREAM_PUBLIC_HOST）');
-}
+// ---------- 自动解析电台流对外地址（逻辑见 streamurl.js，支持建机器人时再次探测） ----------
+const { resolveStreamPublicUrl } = require('./streamurl');
 
 Promise.all([
   resolveStreamPublicUrl(),

@@ -12,6 +12,7 @@
 
 const crypto = require('crypto');
 const { config } = require('./config');
+const { ensureStreamPublicUrl } = require('./streamurl');
 
 // 管理员 token 缓存：避免面板每次轮询/切页都重新登录（auth 接口有 15次/15分钟 限流）
 let tokenCache = { token: null, user: null, at: 0 };
@@ -329,6 +330,9 @@ function stopWatchdog() {
 }
 
 async function linkImpl() {
+  // 生成/恢复机器人前，确保电台流对外地址已正确解析（公网、非内网）。
+  // 启动时的自动探测可能偶发失败，这里再试一次；仍失败会抛出清晰错误而非被 ts6-manager 拒掉。
+  await ensureStreamPublicUrl();
   const c = cfg();
   const token = await getToken();
   const serverConfigId = await ensureServer(token, c);
