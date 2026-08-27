@@ -461,6 +461,16 @@ async function bootstrap() {
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
     }
+    // 清理历史遗留的「点歌助手*」查询会话：每次重连会新建一个，堆积会让 TS6 触发
+    // 会话/洪水限制（"shell closed"/"Unsupported state..."）导致反复断线。踢掉除自己以外的 点歌助手*。
+    if (myClid) {
+      for (const h of items) {
+        if (String(h.client_type) === '1' && h.client_nickname && String(h.client_nickname).startsWith('点歌助手')
+            && h.clid != null && String(h.clid) !== String(myClid)) {
+          cmd('clientkick clid=' + h.clid + ' reason=0').catch(() => {});
+        }
+      }
+    }
     // 订阅频道聊天 + 私聊 + 服务器聊天，尽量覆盖用户的不同发送方式
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
       try { await cmd('servernotifyregister event=' + ev); }
