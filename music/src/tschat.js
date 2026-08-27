@@ -153,14 +153,16 @@ const LOOP_MODES = {
 const LOOP_LABEL = { all: '列表循环', one: '单曲循环', shuffle: '随机播放', off: '顺序播放' };
 
 // 指令是否被面板允许
-// 指令是否可用：优先看该用户的配置（用户管理里设置），未配置才回退到全局 chatCommands
+// 指令是否可用于某用户：全局是唯一开关来源——全局未启用则任何人不可用；
+// 用户配置只是“在全局已启用指令里再做子集限制”（空数组=该用户禁用全部）。
 function cmdEnabled(name, uid) {
+  const cmds = (config.chatCommands || {});
+  if (cmds[name] === false) return false;      // 全局关 → 任何人不可用
   if (uid) {
     const up = (config.chatUserPermissions || {})[uid];
-    if (Array.isArray(up)) return up.includes(name); // 空数组=该用户全部禁用
+    if (Array.isArray(up)) return up.includes(name); // 该用户已配置 → 需在其允许列表内
   }
-  const cmds = (config.chatCommands || {});
-  return cmds[name] !== false;
+  return true;                                  // 全局开且未对该用户配置 → 跟随全局
 }
 
 function runLoop(arg, invokerName) {

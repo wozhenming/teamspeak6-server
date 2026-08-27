@@ -124,7 +124,8 @@ TSPages.users = async function () {
   const CMD_LABELS = [['dian', '点歌'], ['play', '播放'], ['pause', '暂停'], ['next', '切歌'], ['loop', '循环'], ['status', '状态']];
   const GLOBAL = perms.chatCommands || {};
 
-  // 点歌权限弹窗：勾选该用户允许的指令（空 = 完全不勾 = 该用户全部禁用；全不勾选时跟随全局）
+  // 点歌权限弹窗：全局先判定是否可配（全局关闭的指令无法授予用户），
+// 用户可勾选的只是“全局已开启指令”的子集；空=该用户禁用所有已开指令；跟随全局=用点歌页设置。
   async function songPermModal(uid, name) {
     const cur = (perms.chatUserPermissions || {})[uid];
     const usingGlobal = !Array.isArray(cur);
@@ -133,11 +134,15 @@ TSPages.users = async function () {
     document.getElementById('modal-title').textContent = '点歌指令权限：' + name;
     const body = document.getElementById('modal-body');
     body.innerHTML = `
-      <div class="muted" style="font-size:12px;margin-bottom:8px">勾选 = 该用户可用的指令；不勾 = 禁用。也可“跟随全局”（用点歌页的全局设置）。</div>
-      ${CMD_LABELS.map(([k, label], i) => `
-        <label class="ts-toggle" style="margin-bottom:2px">
-          <input type="checkbox" data-cmd="${k}" ${defaultCheck[i] ? 'checked' : ''}> ${label}
-        </label>`).join('')}
+      <div class="muted" style="font-size:12px;margin-bottom:8px">
+        仅全局已开启的指令可授予用户（点歌页配置全局）。灰显 = 全局未开启。
+      </div>
+      ${CMD_LABELS.map(([k, label], i) => {
+        const globalOff = GLOBAL[k] === false;
+        return `<label class="ts-toggle" style="margin-bottom:2px;${globalOff ? 'opacity:.5' : ''}">
+          <input type="checkbox" data-cmd="${k}" ${globalOff ? 'disabled' : ''} ${defaultCheck[i] ? 'checked' : ''}> ${label} ${globalOff ? '<span class="muted">(全局关)</span>' : ''}
+        </label>`;
+      }).join('')}
       <div class="modal-footer">
         <button class="btn" id="f-cancel">取消</button>
         <button class="btn" id="f-global">跟随全局</button>
