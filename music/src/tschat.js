@@ -134,17 +134,31 @@ function runControl(cmd, invokerName) {
       // 切歌后主动重新向 ts6-manager 下达 play-radio：即便它此前因流空档报
       // “Queue empty” 停掉了点歌机器人，也能立即恢复拉流，避免掉线。
       require('./tsbridge').resumeRadio().catch(() => {});
+    } else if (cmd === 'clear') {
+      runClear(invokerName);
     }
   } catch (e) {
     reply(invokerName, '✖ 操作失败：' + e.message);
   }
 }
 
-// 命令分发：!点歌/!点 <ID|链接> · !播放/!继续/!pause · !暂停 · !切歌/!下一首/!next
+// 清空点歌队列（并停止当前播放，emitChange(null) 会触发 player 停止）
+function runClear(invokerName) {
+  try {
+    const n = queue.all().length;
+    queue.clear();
+    reply(invokerName, n ? ('🧹 已清空点歌队列（' + n + ' 首）') : '队列本来就是空的');
+  } catch (e) {
+    reply(invokerName, '✖ 清空失败：' + e.message);
+  }
+}
+
+// 命令分发：!点歌/!点 <ID|链接> · !播放/!继续/!pause · !暂停 · !切歌/!下一首/!next · !清队列
 const CTRL_MAP = {
   play: 'play', resume: 'play', 继续: 'play', 播放: 'play', 开始: 'play',
   pause: 'pause', 暂停: 'pause',
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
+  clear: 'clear', 清队列: 'clear', 清空队列: 'clear', 清队: 'clear', 清掉队列: 'clear',
 };
 const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
 const LOOP_MODES = {
@@ -205,7 +219,7 @@ function runStatus(invokerName) {
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next' };
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -234,7 +248,7 @@ function handleRequest(rawText, invokerName) {
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !循环 · !状态');
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
