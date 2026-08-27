@@ -102,6 +102,7 @@ async function addSong(body, invokerName) {
     if (!detail) detail = { id: songId, name: '歌曲 ' + songId };
     queue.enqueue({
       name: detail.name,
+      songId: songId,
       artists: (detail.ar || []).map((a) => a.name).join(' '),
       album: (detail.al || {}).name || '',
       cover: (detail.al || {}).picUrl || '',

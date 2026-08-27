@@ -537,6 +537,7 @@ app.post('/api/queue', (req, res) => {
     const s = body;
     if (!s.id || !s.name) return fail(res, 400, 'BAD_REQUEST', '缺少歌曲信息');
     const item = queue.enqueue({
+      id: s.id,
       name: s.name,
       artists: s.artists || '',
       album: s.album || '',
