@@ -610,15 +610,18 @@ async function joinBotChannelBody() {
         } catch (e) { /* 忽略 */ }
       }
     }
-    // 移动前再读一次自身位置（消除并发调用间读到的过期 myCid）
+    // 该 TS 服务器的 ServerQuery whoami 频道信息不可靠（会把 cid=2 报成 Default Channel、
+    // 把真实所在频道误报为 1），因此不再用 whoami 的 myCid 判断是否“已在目标频道”，
+    // 而总是发起 clientmove（服务端会校验；若本就在目标频道则返回 id=770，视为成功）。
+    // 仅 myClid（查询端自身 id）可靠，用于 clientmove 的 clid 参数。
     const me = await myInfo();
     const myClid = me.clid != null ? me.clid : myClid0;
     const myCid = me.cid != null ? me.cid : myCid0;
-    console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
+    console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid(不可靠)=' + myCid
       + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
       + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(',')
       + ' | channellist=' + JSON.stringify(chItems.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
-    if (botCid && myClid && String(botCid) !== String(myCid)) {
+    if (botCid && myClid) {
       const cpw = (config.ts6mgrChannelPassword || '').trim();
       let moved = false;
       for (let attempt = 0; attempt < 3 && !moved; attempt++) {
@@ -638,8 +641,6 @@ async function joinBotChannelBody() {
           }
         }
       }
-    } else if (botCid && String(botCid) === String(myCid)) {
-      console.log('[tschat] 已在目标频道 ' + botCid + '，无需移动');
     }
     // 订阅频道聊天 + 私聊 + 服务器聊天，尽量覆盖用户的不同发送方式
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
@@ -760,13 +761,11 @@ async function ensureInBotChannelBody() {
     const me0 = await myInfo();
     const myClid0 = me0.clid;
     const myCid0 = me0.cid;
-    // 移动前再读一次自身位置（消除并发调用间读到的过期 myCid）
+    // 该 TS 服务器的 ServerQuery whoami 频道信息不可靠，不再据此判断是否已在目标频道，
+    // 总是发起 clientmove（服务端校验；已在该频道则返回 id=770，视为成功）。
     const me = await myInfo();
     const myClid = me.clid != null ? me.clid : myClid0;
-    const myCid = me.cid != null ? me.cid : myCid0;
-    if (botCid && String(botCid) === String(myCid)) {
-      // 已在目标频道，无需移动
-    } else if (botCid && myClid && String(botCid) !== String(myCid)) {
+    if (botCid && myClid) {
       try {
         let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
         const cpw = (config.ts6mgrChannelPassword || '').trim();
