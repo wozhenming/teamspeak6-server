@@ -110,6 +110,7 @@ const API = (function () {
     musicTsConfig: () => request('GET', '/api/music/ts-bot/config'),
     musicTsSaveConfig: (cfg) => request('PUT', '/api/music/ts-bot/config', cfg),
     musicTsLink: () => request('POST', '/api/music/ts-bot/link'),
+    musicTsDeleteBot: () => request('DELETE', '/api/music/ts-bot/bot'),
     musicTsUnlink: () => request('POST', '/api/music/ts-bot/unlink'),
     musicTsChannels: () => request('GET', '/api/music/ts-bot/channels'),
     musicTsSwitchChannel: (channel) => request('POST', '/api/music/ts-bot/switch-channel', { channel }),

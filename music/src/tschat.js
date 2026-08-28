@@ -22,6 +22,7 @@ const { config } = require('./config');
 const enhanced = require('./enhanced');
 const queue = require('./queue');
 const player = require('./player');
+const tsbridge = require('./tsbridge');
 
 let conn = null;          // 当前 ssh 连接
 let stream = null;        // shell 数据流
@@ -507,6 +508,12 @@ const BOT_NAME = (process.env.TS_CHAT_BOT_NICKNAME || '点歌机器人').trim();
 function cidOf(x) { return x.cid != null ? x.cid : x.channel_id; }
 function clidOf(x) { return x.clid != null ? x.clid : x.client_id; }
 function findBot(items) {
+  // 优先用 ts6-manager 记录的音乐机器人 clid 精确定位（最稳），昵称只作兜底
+  const botClid = tsbridge.getBotClid();
+  if (botClid != null) {
+    const byClid = items.find((x) => String(cidOf(x)) === String(botClid));
+    if (byClid) return byClid;
+  }
   return items.find((x) => x.client_nickname === BOT_NAME)
     || items.find((x) => x.client_nickname && x.client_nickname.includes(BOT_NAME));
 }
@@ -525,6 +532,8 @@ function findMe(items) {
 async function joinBotChannel() {
   if (!conn) return; // 连接已断开时不操作
   try {
+    // 先刷新机器人 clid 缓存（优先用 clid 精准定位），失败不阻断
+    try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const channelList = await cmd('channellist');
@@ -578,6 +587,7 @@ function resolveTargetCid(items, chItems, myCid) {
 async function ensureInBotChannel() {
   if (state !== 'listening' || !conn) return;
   try {
+    try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const me = findMe(items);

@@ -395,6 +395,7 @@ async function linkImpl() {
   const stationId = await ensureStation(token, serverConfigId);
 
   await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+  await refreshBotClid(token); // 记录机器人在 TS 里的 client id，供查询端定位
   // 等 bot 连接上频道后再播放电台（避免 “Bot is not connected”）
   await waitBotConnected(token, botId);
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
@@ -430,6 +431,32 @@ async function unlink() {
   if (!bot) throw new Error('未找到音乐机器人');
   await authFetch('POST', '/api/music-bots/' + bot.id + '/stop-playback', token);
   return { ok: true, botId: bot.id };
+}
+
+// 彻底删除 ts6-manager 里的点歌机器人（停止看门狗并清空本地记录的 botId）。
+// 之后若想恢复，调用 link() 会以当前配置重新创建机器人。
+async function deleteBot() {
+  stopWatchdog();
+  desiredLinked = false;
+  const c = cfg();
+  let token;
+  try { token = await getToken(); } catch (e) { token = null; }
+  let deleted = false;
+  let statusCode = null;
+  if (token) {
+    try {
+      const bots = await getBots(token);
+      const bot = pickBot(c, bots);
+      if (bot) {
+        const r = await authFetch('DELETE', '/api/music-bots/' + bot.id, token);
+        statusCode = r.status;
+        deleted = r.status === 200 || r.status === 204;
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+  try { config.saveTsBridge({ ts6mgrBotId: '' }); } catch (e) { /* 忽略 */ }
+  botTsClid = null;
+  return { ok: true, deleted, status: statusCode };
 }
 
 // 切换机器人所在频道：更新 defaultChannel 后重启机器人进入新频道（保留播放队列/电台流）
@@ -470,6 +497,7 @@ async function switchChannelInner(path) {
   let bot = pickBot(c, bots) || bots[0];
   if (!bot) return await link(); // 还没建过机器人：走完整 link
   const botId = bot.id;
+  await refreshBotClid(token); // 记录机器人在 TS 里的 client id，供查询端定位
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -513,6 +541,34 @@ async function withAuth(fn) {
   }
 }
 
+// 缓存音乐机器人在 TS 里的 client id（clid），供「点歌助手」查询端精准定位机器人所在频道。
+// 优先用 clid 判断机器人，昵称只作兜底（昵称可能带前后缀/特殊符号）。
+let botTsClid = null;
+async function refreshBotClid(token) {
+  try {
+    const t = token || (await getToken());
+    const c = cfg();
+    const bots = await getBots(t);
+    const bot = pickBot(c, bots);
+    if (!bot) return botTsClid;
+    const { status, json } = await authFetch('GET', '/api/music-bots/' + bot.id, t);
+    if (status !== 200) return botTsClid;
+    const b = (json.data && (json.data.bot || json.data)) || json;
+    const cid = b_clid(b);
+    if (cid != null) botTsClid = cid;
+  } catch (e) { /* 忽略 */ }
+  return botTsClid;
+}
+function getBotClid() { return botTsClid; }
+
+// 从 ts6-manager 的 bot 对象里取出它在 TS 里的 client id（字段名在 TS3/TS6 间可能不同）
+function b_clid(b) {
+  if (!b) return null;
+  return b.clid != null ? b.clid
+    : (b.clientId != null ? b.clientId
+      : (b.client_id != null ? b.client_id : null));
+}
+
 async function status() {
   const c = cfg();
   let token;
@@ -528,7 +584,9 @@ async function status() {
         if (status !== 200) return { enabled: true, connected: false };
         bot = (json.data && json.data.bot) || json.data || json;
       }
-      return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null };
+      const clid = b_clid(bot);
+      if (clid != null) botTsClid = clid;
+      return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null, clid: clid };
     };
     return await withAuth(run(token));
   } catch (e) {
@@ -549,7 +607,7 @@ async function resumeRadio() {
   return { ok: true, botId: bot.id };
 }
 
-module.exports = { link, unlink, switchChannel, status, cfg, listChannels, resumeRadio };
+module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid };
 
 // 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
 if (config.ts6mgrBotId) startWatchdog();

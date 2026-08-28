@@ -358,6 +358,10 @@ app.post('/api/ts-bot/link', async (req, res) => {
 app.post('/api/ts-bot/unlink', async (req, res) => {
   try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
+// 彻底删除 ts6-manager 里的点歌机器人（之后可用「重新连接」重建）
+app.delete('/api/ts-bot/bot', async (req, res) => {
+  try { ok(res, await tsbridge.deleteBot()); } catch (e) { fail(res, 502, 'TS_DEL_BOT_FAIL', e.message); }
+});
 app.post('/api/ts-bot/switch-channel', async (req, res) => {
   try {
     const ch = (req.body && req.body.channel) || '';

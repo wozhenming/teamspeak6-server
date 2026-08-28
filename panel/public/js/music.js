@@ -165,6 +165,16 @@ TSPages.music = async function () {
         </div>
         </div>
       </div>
+      <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+        <div class="muted" style="font-size:12px;font-weight:600">机器人管理</div>
+        <div id="bot-mgmt-status" class="muted" style="font-size:12px">状态：未知</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button class="btn btn-sm" id="btn-bot-refresh">刷新状态</button>
+          <button class="btn btn-sm btn-primary" id="btn-bot-relink">重新连接 / 重建</button>
+          <button class="btn btn-sm btn-danger" id="btn-bot-delete">删除机器人</button>
+        </div>
+        <div class="muted" style="font-size:11px">「重新连接 / 重建」按当前配置重建点歌机器人；「删除机器人」彻底移除 ts6-manager 中的机器人（不会删除本地歌单/队列数据）。</div>
+      </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
     </div>
 
@@ -564,9 +574,16 @@ TSPages.music = async function () {
     try {
       const st = await API.musicTsStatus();
       const box = $('ts-status');
-      if (st.error) { box.textContent = '连接异常：' + st.error; return; }
+      const botBox = $('bot-mgmt-status');
+      if (st.error) { box.textContent = '连接异常：' + st.error; if (botBox) botBox.textContent = '状态：连接异常（' + st.error + '）'; return; }
       const np = st.nowPlaying ? `${st.nowPlaying.title || ''}${st.nowPlaying.artist ? ' - ' + st.nowPlaying.artist : ''}` : '';
       box.textContent = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道') + (np ? '　正在播放：' + np : '');
+      if (botBox) {
+        let txt = st.connected ? ('已连接（' + st.status + '）') : '未连接';
+        if (st.clid != null) txt += '　TS clid: ' + st.clid;
+        if (np) txt += '　正在播放：' + np;
+        botBox.textContent = '状态：' + txt;
+      }
     } catch (e) { /* 忽略 */ }
   }
   $('btn-ts-link').onclick = async () => {
@@ -596,6 +613,26 @@ TSPages.music = async function () {
       TSUtils.toast('已切换到频道：' + ch, 'success');
       refreshTsStatus();
     } catch (e) { TSUtils.toast('切换失败：' + e.message, 'error'); }
+  };
+  $('btn-bot-refresh').onclick = async () => {
+    try { await refreshTsStatus(); TSUtils.toast('已刷新机器人状态', 'success'); }
+    catch (e) { TSUtils.toast('刷新失败：' + e.message, 'error'); }
+  };
+  $('btn-bot-relink').onclick = async () => {
+    try {
+      TSUtils.toast('正在重新连接 / 重建机器人…', 'success');
+      await API.musicTsLink();
+      TSUtils.toast('已重新连接 / 重建机器人', 'success');
+      refreshTsStatus();
+    } catch (e) { TSUtils.toast('重建失败：' + e.message, 'error'); }
+  };
+  $('btn-bot-delete').onclick = async () => {
+    if (!confirm('确定要彻底删除点歌机器人吗？\n（ts6-manager 中的机器人会被移除，本地歌单/队列不受影响；之后可用「重新连接/重建」恢复）')) return;
+    try {
+      const r = await API.musicTsDeleteBot();
+      TSUtils.toast(r.deleted ? '已删除机器人' : '未找到可删除的机器人', 'success');
+      refreshTsStatus();
+    } catch (e) { TSUtils.toast('删除失败：' + e.message, 'error'); }
   };
   async function loadTsChannels() {
     const sel = $('ts-channel');
