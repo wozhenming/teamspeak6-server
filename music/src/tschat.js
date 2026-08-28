@@ -194,13 +194,19 @@ function runClear(invokerName) {
 function runQueue(arg, invokerName) {
   const all = queue.all();
   const total = all.length;
-  let page = parseInt((arg || '').trim(), 10);
-  if (!page || page < 1) page = 1;
   const pageSize = 10;
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  if (page > pages) page = pages;
   const cur = player.get().current;
   const curId = cur ? cur.id : null;
+  // 未指定页码时，默认定位到“当前正在播放的歌曲”所在页
+  let defaultPage = 1;
+  if (curId != null) {
+    const curIndex = all.findIndex((s) => Number(s.id) === Number(curId));
+    if (curIndex >= 0) defaultPage = Math.floor(curIndex / pageSize) + 1;
+  }
+  let page = parseInt((arg || '').trim(), 10);
+  if (!page || page < 1) page = defaultPage;
+  if (page > pages) page = pages;
   const start = (page - 1) * pageSize;
   const slice = all.slice(start, start + pageSize);
   if (!total) {
