@@ -660,14 +660,6 @@ async function joinBotChannelBody() {
       + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
       + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(',')
       + ' | channellist=' + JSON.stringify(chItems.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
-    // 诊断：直接探测 ServerQuery 视角下 cid=1 / cid=2 的真实频道名，对比 ts6-manager 的编号
-    for (const probe of [1, 2]) {
-      try {
-        const ci = await cmd('channelinfo cid=' + probe);
-        const ciObj = (Array.isArray(ci) ? ci[0] : ci) || {};
-        console.log('[tschat][diag] ServerQuery 视角 cid=' + probe + ' 频道名=' + (ciObj.channel_name || '(未知)'));
-      } catch (e) { console.log('[tschat][diag] channelinfo cid=' + probe + ' 失败：' + (e.message || e)); }
-    }
     if (botCid && myClid) {
       const cpw = (config.ts6mgrChannelPassword || '').trim();
       let moved = false;
@@ -688,12 +680,6 @@ async function joinBotChannelBody() {
           }
         }
       }
-      // 诊断：查询 ServerQuery 视角下该 cid 的真实频道名，用于核对编号空间是否一致
-      try {
-        const ci = await cmd('channelinfo cid=' + botCid);
-        const ciObj = (Array.isArray(ci) ? ci[0] : ci) || {};
-        console.log('[tschat][diag] ServerQuery 视角 cid=' + botCid + ' 的频道名=' + (ciObj.channel_name || '(未知)') + ' 完整=' + JSON.stringify(ciObj).slice(0, 200));
-      } catch (e) { console.log('[tschat][diag] channelinfo 失败：' + (e.message || e)); }
     }
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
       try { await cmd('servernotifyregister event=' + ev); }
