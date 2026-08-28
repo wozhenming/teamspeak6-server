@@ -430,6 +430,19 @@ async function unlink() {
   return { ok: true, botId: bot.id };
 }
 
+// 切换机器人所在频道：更新 defaultChannel 后重启机器人进入新频道（保留播放队列/电台流）
+async function switchChannel(channelPath) {
+  const path = (channelPath || '').trim();
+  if (!path) throw new Error('频道不能为空');
+  // 立即持久化新频道，使后续 link() 的 ensureBot 使用它作为 defaultChannel
+  try { config.saveTsBridge({ ts6mgrChannel: path }); } catch (e) { /* 忽略 */ }
+  // 若已连接，先停播再重建连接（re-link 会以新 defaultChannel 重启 bot 进新频道）
+  if (desiredLinked) {
+    try { await unlink(); } catch (e) { /* 忽略 */ }
+  }
+  return await link();
+}
+
 // 带 token 失效重试：401 时强制重新登录再试一次
 async function withAuth(fn) {
   try {
@@ -479,7 +492,7 @@ async function resumeRadio() {
   return { ok: true, botId: bot.id };
 }
 
-module.exports = { link, unlink, status, cfg, listChannels, resumeRadio };
+module.exports = { link, unlink, switchChannel, status, cfg, listChannels, resumeRadio };
 
 // 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
 if (config.ts6mgrBotId) startWatchdog();

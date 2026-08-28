@@ -141,10 +141,40 @@ function runControl(cmd, invokerName, arg) {
       runSearch(arg || '', invokerName);
     } else if (cmd === 'queue') {
       runQueue(arg || '', invokerName);
+    } else if (cmd === 'switch') {
+      runSwitchChannel(arg || '', invokerName);
     }
   } catch (e) {
     reply(invokerName, '✖ 操作失败：' + e.message);
   }
+}
+
+// 切换机器人所在频道：!切频道 <频道名或路径>
+function runSwitchChannel(arg, invokerName) {
+  const name = (arg || '').trim();
+  if (!name) {
+    reply(invokerName, '用法：!切频道 <频道名或路径>，例如 !切频道 点歌专区');
+    return;
+  }
+  (async () => {
+    try {
+      const tsbridge = require('./tsbridge');
+      const channels = await tsbridge.listChannels();
+      if (!channels || !channels.length) return reply(invokerName, '✖ 暂无可切换的频道列表');
+      const lower = name.toLowerCase();
+      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === lower)
+        || channels.find((c) => (c.path || c.name || '').toLowerCase().includes(lower));
+      if (!hit) {
+        const names = channels.slice(0, 10).map((c) => c.path || c.name).join('、');
+        return reply(invokerName, '✖ 未找到频道「' + name + '」，可选：' + names);
+      }
+      const path = hit.path || hit.name;
+      await tsbridge.switchChannel(path);
+      reply(invokerName, '✅ 已切换到频道：' + path);
+    } catch (e) {
+      reply(invokerName, '✖ 切换失败：' + e.message);
+    }
+  })();
 }
 
 // 清空点歌队列（并停止当前播放，emitChange(null) 会触发 player 停止）
@@ -223,7 +253,8 @@ const CTRL_MAP = {
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
   clear: 'clear', 清队列: 'clear', 清空队列: 'clear', 清队: 'clear', 清掉队列: 'clear',
   search: 'search', 搜: 'search', 搜索: 'search', 查找: 'search', 找歌: 'search', find: 'search',
-  queue: 'queue', 队列: 'queue', 列表: 'queue', q: 'queue', playlist: 'queue', 待播: 'queue',
+  queue: 'queue', 队列: 'queue', 列表: 'queue', q: 'queue',   playlist: 'queue', 待播: 'queue',
+  switch: 'switch', 切频道: 'switch', 切换频道: 'switch', switchchannel: 'switch',
 };
 const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
 const LOOP_MODES = {
@@ -284,7 +315,7 @@ function runStatus(invokerName) {
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue' };
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', switch: 'switch' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -313,7 +344,7 @@ function handleRequest(rawText, invokerName) {
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !循环 · !状态');
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !切频道 <频道名> · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）

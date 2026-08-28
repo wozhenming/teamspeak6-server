@@ -352,6 +352,13 @@ app.post('/api/ts-bot/link', async (req, res) => {
 app.post('/api/ts-bot/unlink', async (req, res) => {
   try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
+app.post('/api/ts-bot/switch-channel', async (req, res) => {
+  try {
+    const ch = (req.body && req.body.channel) || '';
+    if (!ch.trim()) return fail(res, 400, 'BAD_REQUEST', '频道不能为空');
+    ok(res, await tsbridge.switchChannel(ch));
+  } catch (e) { fail(res, 502, 'TS_SWITCH_FAIL', e.message); }
+});
 app.get('/api/ts-bot/channels', async (req, res) => {
   try { ok(res, await tsbridge.listChannels()); } catch (e) { fail(res, 400, 'TS_CHANNELS_FAIL', e.message); }
 });

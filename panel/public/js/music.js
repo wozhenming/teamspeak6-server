@@ -81,6 +81,7 @@ TSPages.music = async function () {
             <select id="ts-channel" class="select" style="flex:1">
               <option value="">（加载频道中…）</option>
             </select>
+            <button class="btn btn-sm btn-primary" id="btn-ts-switch" title="把机器人切换到所选频道">切换频道</button>
             <button class="btn btn-sm" id="btn-ts-refresh" title="刷新频道列表">↻</button>
           </div>
         </div>
@@ -543,6 +544,16 @@ TSPages.music = async function () {
   $('btn-ts-unlink').onclick = async () => {
     try { await API.musicTsUnlink(); TSUtils.toast('已断开推流', 'success'); refreshTsStatus(); }
     catch (e) { TSUtils.toast('断开失败：' + e.message, 'error'); }
+  };
+  $('btn-ts-switch').onclick = async () => {
+    const ch = $('ts-channel').value.trim();
+    if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
+    try {
+      TSUtils.toast('正在切换频道…', 'success');
+      await API.musicTsSwitchChannel(ch);
+      TSUtils.toast('已切换到频道：' + ch, 'success');
+      refreshTsStatus();
+    } catch (e) { TSUtils.toast('切换失败：' + e.message, 'error'); }
   };
   async function loadTsChannels() {
     const sel = $('ts-channel');
