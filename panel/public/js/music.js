@@ -450,7 +450,7 @@ TSPages.music = async function () {
         </div>`;
       box.querySelector('#pl-add-all').onclick = async () => {
         try {
-          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover })));
+          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
           TSUtils.toast(`已加入 ${r.count} 首`, 'success');
           refreshQueue();
         } catch (err) { TSUtils.toast(err.message, 'error'); }
@@ -691,7 +691,7 @@ TSPages.music = async function () {
       } else if (btn.dataset.pl) {
         const tracks = await API.musicPlaylistTracksAll(btn.dataset.pl);
         if (!tracks.tracks || !tracks.tracks.length) { TSUtils.toast('歌单为空', 'error'); return; }
-        await API.musicEnqueueMany(tracks.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration })));
+        await API.musicEnqueueMany(tracks.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
         TSUtils.toast(`已将歌单全部 ${tracks.tracks.length} 首加入队列`, 'success');
         refreshQueue();
       } else if (btn.dataset.view) {
