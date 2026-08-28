@@ -257,6 +257,9 @@ a { color: var(--accent); text-decoration: none; }
   box-shadow: var(--shadow);
   min-width: 0;
 }
+/* 页面顶层卡片统一纵向间隔（网格容器内的卡片不受影响） */
+.page-content > .card { margin-top: 16px; }
+.page-content > .card:first-child { margin-top: 0; }
 .card h3 {
   font-size: 14.5px;
   margin-bottom: 14px;
