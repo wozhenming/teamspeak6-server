@@ -568,15 +568,23 @@ async function joinBotChannelBody() {
     let botCid = null;
     let botName = '';
     let botSeen = false;
-    // 优先：直接按“点歌机器人”在 TS 里的 client id / UID / 昵称，跨虚拟服务器定位它所在的频道，
-    // 不再依赖频道名与配置——点歌助手只要跟随机器人即可（用户要求按 UID 判断）。
-    const located = await locateMusicBot();
-    if (located) {
-      botCid = located.cid; botName = located.nick + '(按clientid定位)'; botSeen = true;
-      console.log('[tschat] 已按 client id 定位点歌机器人：clid=' + located.clid + ' 频道cid=' + located.cid + ' 虚拟服务器sid=' + located.sid);
+    // 优先：用 ts6-manager（完整可见性）直接取音乐机器人当前所在频道的 cid 与名称。
+    // 查询端 ServerQuery 看不到其他客户端/频道，所以必须以 ts6-manager 为准。
+    let botChan = null;
+    try { botChan = await tsbridge.getBotChannel(); } catch (e) { /* 忽略 */ }
+    if (botChan && botChan.cid != null) {
+      botCid = botChan.cid; botName = (botChan.name || ('cid' + botChan.cid)) + '(ts6-manager)'; botSeen = true;
+      console.log('[tschat] ts6-manager 报告音乐机器人频道：name=' + botChan.name + ' cid=' + botChan.cid);
     } else {
-      // 兜底：按配置频道名（跨虚拟服务器扫描）
-      await selectVirtualServer((config.ts6mgrChannel || '').trim());
+      // 退回：按 client id / UID 跨虚拟服务器定位（受 ServerQuery 可见性限制，可能失败）
+      const located = await locateMusicBot();
+      if (located) {
+        botCid = located.cid; botName = located.nick + '(按clientid定位)'; botSeen = true;
+        console.log('[tschat] 已按 client id 定位点歌机器人：clid=' + located.clid + ' 频道cid=' + located.cid + ' 虚拟服务器sid=' + located.sid);
+      } else {
+        // 兜底：按配置频道名（跨虚拟服务器扫描）
+        await selectVirtualServer((config.ts6mgrChannel || '').trim());
+      }
     }
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
@@ -734,10 +742,15 @@ async function ensureInBotChannelBody() {
   if (state !== 'listening' || !conn) return;
   try {
     try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
-    // 优先按 client id / UID 跨虚拟服务器定位点歌机器人
+    // 优先用 ts6-manager（完整可见性）取音乐机器人当前频道 cid
     let botCid = null;
-    const located = await locateMusicBot();
-    if (located) botCid = located.cid;
+    let botChan = null;
+    try { botChan = await tsbridge.getBotChannel(); } catch (e) { /* 忽略 */ }
+    if (botChan && botChan.cid != null) botCid = botChan.cid;
+    if (!botCid) {
+      const located = await locateMusicBot();
+      if (located) botCid = located.cid;
+    }
     if (!botCid) {
       const list = await cmd('clientlist -uid');
       const items = (Array.isArray(list) ? list : [list]).filter(Boolean);

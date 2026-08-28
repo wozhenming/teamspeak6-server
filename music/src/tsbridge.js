@@ -666,7 +666,40 @@ async function resumeRadio() {
   return { ok: true, botId: bot.id };
 }
 
-module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid };
+module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
+
+// 取音乐机器人当前所在频道（name + cid）。ts6-manager 有完整可见性，不受 ServerQuery 限制。
+// 返回 { cid, name } 或 null。
+async function getBotChannel() {
+  try {
+    const t = await getToken();
+    const c = cfg();
+    const bots = await getBots(t);
+    const target = pickBot(c, bots);
+    if (!target) return null;
+    const scId = target.serverConfigId || (await ensureServer(t, c));
+    // 音乐机器人详情（可能含当前频道）
+    const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
+    if (status !== 200) return null;
+    const b = (json.data && (json.data.bot || json.data)) || json;
+    // 频道候选字段
+    const chName = b.channel || b.currentChannel || b.channelName || b.defaultChannel || null;
+    // 用频道列表把“频道名”映射到 ts6-manager 的 cid（更可靠）
+    let cid = null;
+    try {
+      const channels = await getChannels(t, scId);
+      const lower = (chName || '').trim().toLowerCase();
+      const hit = channels.find((x) => (x.name || '').trim().toLowerCase() === lower)
+        || channels.find((x) => ((x.path || x.name || '').trim().toLowerCase() === lower))
+        || channels.find((x) => ((x.path || x.name || '').trim().toLowerCase().endsWith(lower.split('/').pop())));
+      if (hit) cid = hit.id;
+    } catch (e) { /* 忽略 */ }
+    // 若详情里直接带了频道 id 也采用
+    if (cid == null) cid = b.channelId != null ? b.channelId : (b.cid != null ? b.cid : null);
+    if (!chName && cid == null) return null;
+    return { cid: cid != null ? String(cid) : null, name: chName };
+  } catch (e) { return null; }
+}
 
 // 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
 if (config.ts6mgrBotId) startWatchdog();
