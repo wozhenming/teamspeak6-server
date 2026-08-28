@@ -577,8 +577,14 @@ function connect() {
 let bootstrapped = false;
 let reconcileTimer = null; // 定时自检并跟随机器人频道，防止二者漂移
 let myNick = '';           // 本查询端昵称，用于从 clientlist 中定位自己
-// 机器人昵称（可配置，默认“点歌机器人”）：部分服务器昵称带前后缀，可用 TS_CHAT_BOT_NICKNAME 覆盖
-const BOT_NAME = (process.env.TS_CHAT_BOT_NICKNAME || '点歌机器人').trim();
+// 点歌机器人昵称（识别它所在频道以跟随）。
+// 优先取面板/配置持久化的 ts6mgrBotNickname（可对机器人改名后配置）；TS_CHAT_BOT_NICKNAME 作古老 env 覆盖。
+// 用函数而非常量，便于面板改名后热应用（定时自检会用最新昵称重新定位）。
+function botNickname() {
+  const envOld = (process.env.TS_CHAT_BOT_NICKNAME || '').trim();
+  if (envOld) return envOld;
+  return (config.ts6mgrBotNickname || '点歌机器人').trim();
+}
 
 // 兼容 TS3/TS6 字段命名差异（clid/client_id、cid/channel_id）
 function cidOf(x) { return x.cid != null ? x.cid : x.channel_id; }
@@ -590,8 +596,8 @@ function findBot(items) {
     const byClid = items.find((x) => String(cidOf(x)) === String(botClid));
     if (byClid) return byClid;
   }
-  return items.find((x) => x.client_nickname === BOT_NAME)
-    || items.find((x) => x.client_nickname && x.client_nickname.includes(BOT_NAME));
+  return items.find((x) => x.client_nickname === botNickname())
+    || items.find((x) => x.client_nickname && x.client_nickname.includes(botNickname()));
 }
 function findMe(items) {
   if (myNick) {
@@ -716,7 +722,7 @@ async function joinBotChannelBody() {
       try { await cmd('servernotifyregister event=' + ev); }
       catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
     }
-    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人(' + BOT_NAME + ')，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
+    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人(' + botNickname() + ')，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     console.log('[tschat] 已就位频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
   } catch (e) {
     console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
@@ -758,7 +764,7 @@ async function selectVirtualServer(wantName) {
 }
 
 // 跨虚拟服务器定位“点歌机器人”：优先用 ts6-manager 已知的 TS client id（最精准），
-// 其次按昵称包含 BOT_NAME 匹配。返回 { cid, clid, sid, uid, nick }；找不到返回 null。
+// 其次按昵称包含 botNickname() 匹配。返回 { cid, clid, sid, uid, nick }；找不到返回 null。
 // 定位过程中会把查询端切到机器人所在的虚拟服务器（use 过去）。
 async function locateMusicBot() {
   const targetClid = tsbridge.getBotClid();
@@ -778,7 +784,7 @@ async function locateMusicBot() {
         console.log('[tschat][diag] vs sid=' + sid + ' clients=' + JSON.stringify(items.map((x) => ({ clid: clidOf(x), nick: x.client_nickname, cid: cidOf(x) })))
           + ' channels=' + JSON.stringify(chs.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
         let bot = (targetClid != null) ? items.find((x) => String(clidOf(x)) === String(targetClid)) : null;
-        if (!bot) bot = items.find((x) => (x.client_nickname || '').includes(BOT_NAME));
+        if (!bot) bot = items.find((x) => (x.client_nickname || '').includes(botNickname()));
         if (bot) {
           return { cid: cidOf(bot), clid: clidOf(bot), sid, uid: bot.client_unique_identifier, nick: bot.client_nickname };
         }
@@ -800,7 +806,7 @@ function resolveTargetCid(items, chItems, myCid) {
       || chItems.find((x) => (x.channel_name || '').toLowerCase().endsWith(leaf));
     if (ch) return { cid: cidOf(ch), botSeen, name: wantName };
   }
-  if (bot) return { cid: cidOf(bot), botSeen: true, name: (bot.channel_name || bot.client_nickname || BOT_NAME) };
+  if (bot) return { cid: cidOf(bot), botSeen: true, name: (bot.channel_name || bot.client_nickname || botNickname()) };
   const voice = items.find((x) => String(x.client_type) !== '1');
   if (voice && String(cidOf(voice)) !== String(myCid) && cidOf(voice) != null) return { cid: cidOf(voice), botSeen, name: voice.channel_name || '' };
   return { cid: null, botSeen, name: '' };

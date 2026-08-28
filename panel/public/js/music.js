@@ -76,6 +76,10 @@ TSPages.music = async function () {
       <div id="ts-status" class="muted" style="font-size:12.5px">未连接</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         <div style="display:flex;flex-direction:column;gap:3px">
+          <span class="muted" style="font-size:12px">点歌机器人昵称（改名后填实际昵称，点歌助手据此跟随）</span>
+          <input class="input" id="ts-bot-nickname" type="text" placeholder="点歌机器人" style="flex:1">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px">
           <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
           <div style="display:flex;gap:8px">
             <select id="ts-channel" class="select" style="flex:1">
@@ -593,8 +597,8 @@ TSPages.music = async function () {
       if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
       if (!key) { TSUtils.toast('请先填写 TS API Key', 'error'); return; }
       TSUtils.toast('正在生成机器人并连接 TeamSpeak…', 'success');
-      // 保存频道与 Key，再自动建连（后端异步执行，最长可能 25s+，避免代理超时）
-      await API.musicTsSaveConfig({ ts6mgrChannel: ch, tsApiKey: key });
+      // 保存频道、昵称与 Key，再自动建连（后端异步执行，最长可能 25s+，避免代理超时）
+      await API.musicTsSaveConfig({ ts6mgrChannel: ch, ts6mgrBotNickname: $('ts-bot-nickname').value.trim() || '点歌机器人', tsApiKey: key });
       await API.musicTsLink();
       TSUtils.toast('已发起连接，请稍后用「刷新状态」查看结果', 'success');
       setTimeout(refreshTsStatus, 8000);
@@ -641,6 +645,7 @@ TSPages.music = async function () {
     try {
       const cfg = await API.musicTsConfig();
       $('ts-key').value = cfg.tsApiKey || '';
+      $('ts-bot-nickname').value = cfg.ts6mgrBotNickname || '点歌机器人';
       $('ts-chat-on').checked = cfg.tsChatEnabled !== false;
       refreshChatState();
       const cmds = cfg.chatCommands || {};

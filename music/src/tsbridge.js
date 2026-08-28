@@ -249,17 +249,22 @@ async function ensureStation(token, serverConfigId) {
 }
 
 // 找到我们的点歌机器人：优先用配置的 botId，其次按名字匹配（避免重复创建出多个机器人）
+// 匹配名取配置的机器人昵称 ts6mgrBotNickname（默认“点歌机器人”），支持面板改名后仍能识别。
+function botNickname() {
+  return (config.ts6mgrBotNickname || '点歌机器人').trim();
+}
 function pickBot(c, bots) {
+  const nick = botNickname();
   if (c.botId) {
     const byId = bots.find((b) => b && b.id === c.botId);
     if (byId) return byId;
   }
   // 精确匹配
-  const byExact = bots.find((b) => b && (b.name === '点歌机器人' || b.nickname === '点歌机器人'));
+  const byExact = bots.find((b) => b && (b.name === nick || b.nickname === nick));
   if (byExact) return byExact;
   // 模糊兜底：ts6-manager 可能把名字放在别的字段或带前后缀（如 “点歌机器人#1”）
   return bots.find((b) =>
-    b && (((b.name || '').includes('点歌机器人')) || ((b.nickname || '').includes('点歌机器人')))
+    b && (((b.name || '').includes(nick)) || ((b.nickname || '').includes(nick)))
   ) || null;
 }
 
@@ -273,10 +278,16 @@ async function ensureBot(token, serverConfigId) {
     if (c.channel) {
       try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: c.channel }); } catch (e) { /* 忽略 */ }
     }
+    // 机器人改名支持：若配置昵称与 ts6-manager 里机器人的 name/nickname 不一致，则更新之。
+    const want = botNickname();
+    const have = (existing.name || existing.nickname || '').trim();
+    if (want && have !== want) {
+      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { name: want, nickname: want }); console.log('[tsbridge] 已按配置把机器人改名为 ' + want); } catch (e) { /* 忽略 */ }
+    }
     try { config.saveTsBridge({ ts6mgrBotId: String(existing.id) }); } catch (e) { /* 忽略 */ }
     return existing.id;
   }
-  const name = '点歌机器人';
+  const name = botNickname();
   const create = await authFetch('POST', '/api/music-bots', token, {
     name,
     serverConfigId,
@@ -685,7 +696,7 @@ async function getBotCurrentChannelServerSide() {
     if (!target) return null;
     const scId = target.serverConfigId || (await ensureServer(t, c));
     const sid = await getVirtualServerId(t, scId);
-    const nick = (target.nickname || target.name || '点歌机器人');
+    const nick = (target.nickname || target.name || botNickname());
     // 方法A：直接取客户端列表
     let clients = [];
     try {
@@ -694,8 +705,12 @@ async function getBotCurrentChannelServerSide() {
     } catch (e) { /* 忽略 */ }
     console.log('[tsbridge][botChan] clients端点返回 ' + clients.length + ' 个客户端: '
       + JSON.stringify(clients.map((cl) => ({ n: cl.nickname || cl.client_nickname, cid: cl.cid || cl.channel_id || cl.channelId }))));
-    const findBot = (list) => list.find((cl) => (((cl.nickname || cl.client_nickname) || '').includes('点歌机器人')))
-      || list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick);
+    // 用 ts6-manager 里该 bot 的实际昵称（target.nickname/name）优先精确匹配；
+    // 兼容前端对机器人改名后 client_nickname 与早前记录不一致的情况。
+    // 默认昵称“点歌机器人”沿用 includes 兜底（带前后缀可识别）；自定义昵称也做 includes 兼容。
+    const fallbackSubstr = (s) => ((s.nickname || s.client_nickname) || '').includes(nick);
+    const findBot = (list) => list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick)
+      || list.find(fallbackSubstr);
     let bot = findBot(clients);
     let cid = null;
     if (bot) {

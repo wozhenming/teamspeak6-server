@@ -35,6 +35,9 @@ const config = {
   ts6mgrPass: env('TS6MGR_PASS', 'Tsbot123'),
   ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
   ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
+  // 点歌机器人昵称：用作 ts6-manager 内机器人的 name/nickname，以及点歌助手跟随定位的识别名。
+  // 可对机器人改名后在此配置为实际昵称；面板可编辑并持久化。
+  ts6mgrBotNickname: env('TS6MGR_BOT_NICKNAME', '点歌机器人'),
   // ts6-manager 拉取本服务音频流所用的地址。
   // 注意：ts6-manager 的 SSRF 防护会拒绝解析到内网 IP 的主机名（如 music/teamspeak），
   // 因此这里必须填“对 ts6-manager 而言可达且非内网”的地址，通常是服务器公网 IP/域名。
@@ -80,6 +83,7 @@ function loadTsBridge() {
     if (o.ts6mgrPass) config.ts6mgrPass = o.ts6mgrPass;
     if (o.ts6mgrBotId) config.ts6mgrBotId = o.ts6mgrBotId;
     if (o.ts6mgrChannel) config.ts6mgrChannel = o.ts6mgrChannel;
+    if (o.ts6mgrBotNickname) config.ts6mgrBotNickname = o.ts6mgrBotNickname;
     if (o.tsHost) config.tsHost = o.tsHost;
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
@@ -106,6 +110,7 @@ config.saveTsBridge = (o) => {
     ts6mgrPass: (o.ts6mgrPass || '').trim() || config.ts6mgrPass,
     ts6mgrBotId: (o.ts6mgrBotId || '').trim() || config.ts6mgrBotId,
     ts6mgrChannel: (o.ts6mgrChannel || '').trim() || config.ts6mgrChannel,
+    ts6mgrBotNickname: (o.ts6mgrBotNickname || '').trim() || config.ts6mgrBotNickname,
     tsHost: (o.tsHost || '').trim() || config.tsHost,
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
