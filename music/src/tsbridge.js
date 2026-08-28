@@ -332,6 +332,14 @@ async function waitBotConnected(token, botId, tries = 30) {
         if (!dumped && (s === 'error' || s === 'stopped')) {
           dumped = true;
           console.log('[tsbridge] waitBotConnected: 首次失败，bot 详情=' + JSON.stringify(json));
+          // 再抓 serverConfig（TS 连接）详情，错误的根因通常在这一层
+          try {
+            const scId = json && (json.serverConfigId || (json.serverConfig && json.serverConfig.id));
+            if (scId) {
+              const sc = await authFetch('GET', '/api/servers/' + scId, token);
+              console.log('[tsbridge] serverConfig(' + scId + ') 详情=' + JSON.stringify(sc.json));
+            }
+          } catch (e2) { console.log('[tsbridge] 读取 serverConfig 失败: ' + e2.message); }
         } else if (i % 3 === 0 || s) {
           console.log('[tsbridge] waitBotConnected: 当前 status=' + s + (detail ? ' 详情=' + detail : '') + ' (尝试 ' + (i + 1) + '/' + tries + ')');
         }
