@@ -541,16 +541,24 @@ async function joinBotChannel() {
     const me = findMe(items);
     const myClid = me ? clidOf(me) : null;
     const myCid = me ? cidOf(me) : null;
-    const { cid: botCid, botSeen } = resolveTargetCid(items, chItems, myCid);
+    const { cid: botCid, botSeen, botName } = resolveTargetCid(items, chItems, myCid);
     console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
-      + ' botCid=' + botCid + ' botSeen=' + botSeen
+      + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
       + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(','));
     if (botCid && myClid && String(botCid) !== String(myCid)) {
-      try {
-        await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
-        console.log('[tschat] 已 clientmove 到频道 ' + botCid);
-      } catch (e) {
-        console.log('[tschat] clientmove 失败：' + (e.message || e));
+      const cpw = (config.ts6mgrChannelPassword || '').trim();
+      let moved = false;
+      for (let attempt = 0; attempt < 3 && !moved; attempt++) {
+        try {
+          let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
+          if (cpw) cmdStr += ' cpw=' + cpw;
+          await cmd(cmdStr);
+          console.log('[tschat] 已 clientmove 到频道 ' + botCid + (cpw ? '（带密码）' : ''));
+          moved = true;
+        } catch (e) {
+          console.log('[tschat] clientmove 第 ' + (attempt + 1) + ' 次失败：' + (e.message || e));
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+        }
       }
     }
     // 订阅频道聊天 + 私聊 + 服务器聊天，尽量覆盖用户的不同发送方式
@@ -574,12 +582,12 @@ function resolveTargetCid(items, chItems, myCid) {
     const leaf = wantName.split('/').pop();
     const ch = chItems.find((x) => (x.channel_name || '') === wantName)
       || chItems.find((x) => (x.channel_name || '').endsWith(leaf));
-    if (ch) return { cid: cidOf(ch), botSeen };
+    if (ch) return { cid: cidOf(ch), botSeen, name: wantName };
   }
-  if (bot) return { cid: cidOf(bot), botSeen: true };
+  if (bot) return { cid: cidOf(bot), botSeen: true, name: (bot.channel_name || bot.client_nickname || BOT_NAME) };
   const voice = items.find((x) => String(x.client_type) !== '1');
-  if (voice && String(cidOf(voice)) !== String(myCid) && cidOf(voice) != null) return { cid: cidOf(voice), botSeen };
-  return { cid: null, botSeen };
+  if (voice && String(cidOf(voice)) !== String(myCid) && cidOf(voice) != null) return { cid: cidOf(voice), botSeen, name: voice.channel_name || '' };
+  return { cid: null, botSeen, name: '' };
 }
 
 // 轻量自检：若查询端已不在机器人所在频道，则自动跟过去。

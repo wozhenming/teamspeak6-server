@@ -60,6 +60,8 @@ const config = {
   tsApiKey: env('TS_API_KEY', ''),
   // TS 服务器管理员密码（仅用于首次自动生成 API Key；留空则需手动在 .env 配 TS_API_KEY）
   tsQueryAdminPassword: env('TS_QUERY_ADMIN_PASSWORD', ''),
+  // 机器人要加入的频道密码（频道设了密码时需填；点歌助手 clientmove 与点歌机器人加入都要用）
+  ts6mgrChannelPassword: env('TS_CHANNEL_PASSWORD', ''),
   // TS 频道聊天点歌开关：默认随密码存在而启用；面板可覆盖并持久化
   tsChatEnabled: process.env.TS_CHAT_ENABLED !== undefined
     ? process.env.TS_CHAT_ENABLED !== '0'
@@ -82,6 +84,7 @@ function loadTsBridge() {
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
     if (o.tsApiKey) config.tsApiKey = o.tsApiKey;
     if (o.tsQueryAdminPassword) config.tsQueryAdminPassword = o.tsQueryAdminPassword;
+    if (o.ts6mgrChannelPassword) config.ts6mgrChannelPassword = o.ts6mgrChannelPassword;
     if (o.tsChatEnabled != null) config.tsChatEnabled = !!o.tsChatEnabled;
     if (o.chatCommands && typeof o.chatCommands === 'object') {
       config.chatCommands = Object.assign({}, CHAT_CMD_DEFAULT, o.chatCommands);
@@ -107,6 +110,7 @@ config.saveTsBridge = (o) => {
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
     tsApiKey: (o.tsApiKey || '').trim() || config.tsApiKey,
     tsQueryAdminPassword: (o.tsQueryAdminPassword || '').trim() || config.tsQueryAdminPassword,
+    ts6mgrChannelPassword: (o.ts6mgrChannelPassword || '').trim() || config.ts6mgrChannelPassword,
     tsChatEnabled: o.tsChatEnabled != null ? !!o.tsChatEnabled : (config.tsChatEnabled !== false),
     chatCommands: Object.assign({}, CHAT_CMD_DEFAULT,
       (o.chatCommands && typeof o.chatCommands === 'object') ? o.chatCommands : (config.chatCommands || {})),

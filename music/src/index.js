@@ -319,6 +319,7 @@ app.get('/api/ts-bot/config', (req, res) => {
     ts6mgrPass: config.ts6mgrPass,
     ts6mgrBotId: config.ts6mgrBotId,
     ts6mgrChannel: config.ts6mgrChannel,
+    ts6mgrChannelPassword: config.ts6mgrChannelPassword || '',
     streamPublicUrl: config.streamPublicUrl,
     tsHost: config.tsHost,
     tsWebqueryPort: config.tsWebqueryPort,

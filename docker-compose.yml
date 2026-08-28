@@ -123,6 +123,8 @@ services:
       - TS_API_KEY=${TS_API_KEY:-}
       # 可选：设置后可用于首次自动生成 TS API Key（无需手动 apikeyadd）
       - TS_QUERY_ADMIN_PASSWORD=${TS_QUERY_ADMIN_PASSWORD:-}
+      # 机器人要加入的频道若设了密码，填这里（点歌机器人与点歌助手都会用它加入）
+      - TS_CHANNEL_PASSWORD=${TS_CHANNEL_PASSWORD:-}
       # TS 频道聊天点歌：设置上面密码后自动启用（TS_CHAT_ENABLED=0 可显式关闭）。
       # 同频道用户在频道聊天发送：!点歌 <歌曲ID或网易云链接> 即可点歌。
       - TS_CHAT_ENABLED=${TS_CHAT_ENABLED:-}

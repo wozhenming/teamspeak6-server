@@ -279,6 +279,7 @@ async function ensureBot(token, serverConfigId) {
     serverConfigId,
     nickname: name,
     defaultChannel: c.channel,
+    channelPassword: config.ts6mgrChannelPassword || '',
     volume: 50,
     autoStart: false,
   });
@@ -557,8 +558,8 @@ async function switchChannelInner(path) {
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      // 1) 更新目标频道
-      try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: p }); } catch (e) { /* 忽略 */ }
+       // 1) 更新目标频道
+      try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: p, channelPassword: config.ts6mgrChannelPassword || '' }); } catch (e) { /* 忽略 */ }
       // 2) 重启机器人（离开旧频道并以新频道重新加入）
       const r = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
       if (r.status !== 200) {
