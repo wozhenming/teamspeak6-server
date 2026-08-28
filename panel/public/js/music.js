@@ -123,6 +123,46 @@ TSPages.music = async function () {
           </div>
           <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
         </div>
+        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+          <div class="muted" style="font-size:12px;font-weight:600">音质与行为</div>
+          <label class="ts-toggle" style="font-size:12.5px">
+            <input type="checkbox" id="ts-autopause-on">
+            <span>频道无人时自动暂停，有人进入自动恢复</span>
+          </label>
+          <div style="display:flex;flex-wrap:wrap;gap:10px 16px;font-size:12px;align-items:center">
+            <label style="display:flex;gap:6px;align-items:center">编码
+              <select id="ts-audio-codec" class="select" style="width:108px">
+                <option value="libmp3lame">MP3</option>
+                <option value="libopus">Opus</option>
+              </select>
+            </label>
+            <label style="display:flex;gap:6px;align-items:center">码率
+              <select id="ts-audio-bitrate" class="select" style="width:84px">
+                <option value="128k">128k</option>
+                <option value="192k">192k</option>
+                <option value="256k">256k</option>
+                <option value="320k">320k</option>
+              </select>
+            </label>
+            <label style="display:flex;gap:6px;align-items:center">采样率
+              <select id="ts-audio-rate" class="select" style="width:84px">
+                <option value="44100">44100</option>
+                <option value="48000">48000</option>
+              </select>
+            </label>
+            <label style="display:flex;gap:6px;align-items:center">声道
+              <select id="ts-audio-channels" class="select" style="width:84px">
+                <option value="1">单声道</option>
+                <option value="2">立体声</option>
+              </select>
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm" id="btn-ts-audio-save">保存音质设置</button>
+            <span class="muted" id="ts-audio-state" style="font-size:11.5px">修改后下一首生效</span>
+          </div>
+        </div>
+        </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
     </div>
@@ -569,6 +609,12 @@ TSPages.music = async function () {
       });
       $('ts-token-on').checked = cfg.streamTokenEnabled !== false;
       $('ts-token-val').textContent = cfg.streamTokenEnabled !== false && cfg.streamToken ? cfg.streamToken : '未开启';
+      // 音质与行为
+      $('ts-autopause-on').checked = cfg.autoPauseEmpty !== false;
+      $('ts-audio-codec').value = cfg.audioCodec || 'libmp3lame';
+      $('ts-audio-bitrate').value = cfg.audioBitrate || '320k';
+      $('ts-audio-rate').value = String(cfg.audioRate || 48000);
+      $('ts-audio-channels').value = String(cfg.audioChannels || 2);
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
         return;
@@ -659,6 +705,23 @@ TSPages.music = async function () {
       await API.musicTsSaveConfig(payload);
       TSUtils.toast('聊天点歌设置已保存', 'success');
       await loadTsChannels();
+    } catch (e) {
+      TSUtils.toast('保存失败：' + e.message, 'error');
+    }
+  };
+
+  // ---------- 音质与行为设置 ----------
+  $('btn-ts-audio-save').onclick = async () => {
+    try {
+      const payload = {
+        audioCodec: $('ts-audio-codec').value,
+        audioBitrate: $('ts-audio-bitrate').value,
+        audioRate: parseInt($('ts-audio-rate').value, 10) || 48000,
+        audioChannels: parseInt($('ts-audio-channels').value, 10) || 2,
+        autoPauseEmpty: $('ts-autopause-on').checked,
+      };
+      await API.musicTsSaveConfig(payload);
+      TSUtils.toast('音质与行为设置已保存（下一首生效）', 'success');
     } catch (e) {
       TSUtils.toast('保存失败：' + e.message, 'error');
     }

@@ -333,7 +333,7 @@ async function getChannelClientCount() {
 
 // 频道无人（仅机器人自身）时自动暂停；有人进入且此前是“因无人暂停”的，则自动恢复。
 async function maybeAutoPauseEmpty() {
-  if (process.env.AUTO_PAUSE_EMPTY === 'false') return;
+  if (config.autoPauseEmpty === false) return;
   const count = await getChannelClientCount();
   if (count == null) return; // 无法判断则维持现状
   const playing = !!player.get().playing;

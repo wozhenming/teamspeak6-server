@@ -52,6 +52,8 @@ const config = {
   audioBitrate: env('STREAM_AUDIO_BITRATE', '320k'),
   audioRate: parseInt(env('STREAM_AUDIO_RATE', '48000'), 10),
   audioChannels: parseInt(env('STREAM_AUDIO_CHANNELS', '2'), 10),
+  // 频道无人时自动暂停、有人进入自动恢复（默认开启；面板可关）
+  autoPauseEmpty: env('AUTO_PAUSE_EMPTY', 'true') !== 'false',
   // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，自动建连）
   tsHost: env('TS_HOST', 'teamspeak'),
   tsWebqueryPort: parseInt(env('TS_WEBQUERY_PORT', '10080'), 10),
@@ -86,6 +88,11 @@ function loadTsBridge() {
     }
     if (o.streamTokenEnabled != null) config.streamTokenEnabled = !!o.streamTokenEnabled;
     if (o.streamToken) config.streamToken = o.streamToken;
+    if (o.audioCodec) config.audioCodec = o.audioCodec;
+    if (o.audioBitrate) config.audioBitrate = o.audioBitrate;
+    if (o.audioRate != null) config.audioRate = parseInt(o.audioRate, 10);
+    if (o.audioChannels != null) config.audioChannels = parseInt(o.audioChannels, 10);
+    if (o.autoPauseEmpty != null) config.autoPauseEmpty = !!o.autoPauseEmpty;
   } catch (e) { /* 无持久化配置 */ }
 }
 loadTsBridge();
@@ -105,6 +112,11 @@ config.saveTsBridge = (o) => {
       (o.chatCommands && typeof o.chatCommands === 'object') ? o.chatCommands : (config.chatCommands || {})),
     streamTokenEnabled: o.streamTokenEnabled != null ? !!o.streamTokenEnabled : (config.streamTokenEnabled !== false),
     streamToken: (o.streamToken || '').trim() || config.streamToken,
+    audioCodec: (o.audioCodec || '').trim() || config.audioCodec,
+    audioBitrate: (o.audioBitrate || '').trim() || config.audioBitrate,
+    audioRate: o.audioRate != null ? parseInt(o.audioRate, 10) : config.audioRate,
+    audioChannels: o.audioChannels != null ? parseInt(o.audioChannels, 10) : config.audioChannels,
+    autoPauseEmpty: o.autoPauseEmpty != null ? !!o.autoPauseEmpty : config.autoPauseEmpty,
   };
   Object.assign(config, next);
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }

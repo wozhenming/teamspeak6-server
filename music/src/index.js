@@ -328,6 +328,11 @@ app.get('/api/ts-bot/config', (req, res) => {
     chatCommands: config.chatCommands,
     streamTokenEnabled: config.streamTokenEnabled !== false,
     streamToken: config.streamToken || '',
+    audioCodec: config.audioCodec,
+    audioBitrate: config.audioBitrate,
+    audioRate: config.audioRate,
+    audioChannels: config.audioChannels,
+    autoPauseEmpty: config.autoPauseEmpty !== false,
   });
 });
 app.put('/api/ts-bot/config', (req, res) => {
