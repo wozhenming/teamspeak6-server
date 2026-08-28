@@ -455,6 +455,7 @@ function cmd(cmdStr, timeoutMs = 6000) {
 function connect() {
   const host = config.tsHost || 'teamspeak';
   const port = parseInt(process.env.TS_CHAT_SSH_PORT || '10022', 10);
+  console.log('[tschat][diag] 连接 TeamSpeak SSH Query：host=' + host + ' port=' + port);
   state = 'connecting';
   const { Client } = require('ssh2');
   const c = new Client();
@@ -686,6 +687,7 @@ async function locateMusicBot() {
   try {
     const sl = await cmd('serverlist');
     const servers = (Array.isArray(sl) ? sl : [sl]).filter(Boolean);
+    console.log('[tschat][diag] serverlist=' + JSON.stringify(servers) + ' targetClid=' + targetClid);
     for (const s of servers) {
       const sid = s.virtualserver_id || s.sid || s.id;
       if (!sid) continue;
@@ -693,6 +695,10 @@ async function locateMusicBot() {
         await cmd('use ' + sid);
         const list = await cmd('clientlist -uid');
         const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+        const cl = await cmd('channellist');
+        const chs = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
+        console.log('[tschat][diag] vs sid=' + sid + ' clients=' + JSON.stringify(items.map((x) => ({ clid: clidOf(x), nick: x.client_nickname, cid: cidOf(x) })))
+          + ' channels=' + JSON.stringify(chs.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
         let bot = (targetClid != null) ? items.find((x) => String(clidOf(x)) === String(targetClid)) : null;
         if (!bot) bot = items.find((x) => (x.client_nickname || '').includes(BOT_NAME));
         if (bot) {
