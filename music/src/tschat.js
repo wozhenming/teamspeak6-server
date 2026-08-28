@@ -460,6 +460,8 @@ function connect() {
 }
 
 let bootstrapped = false;
+let reconcileTimer = null; // 定时自检并跟随机器人频道，防止二者漂移
+
 // 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
 // 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
 // 否则查询端停留在旧频道，收不到新频道的 !点歌 等指令。
@@ -473,27 +475,9 @@ async function joinBotChannel() {
     const list = await cmd('clientlist -uid');
     const rawItems = Array.isArray(list) ? list : [list];
     const items = rawItems.filter(Boolean);
-    // 1) 优先按已配置的点歌频道名/路径定位；2) 其次按机器人昵称；3) 兜底第一个语音用户频道
-    const wantName = (config.ts6mgrChannel || '').trim();
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
-    let botCid = null;
-    let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
-    if (wantName) {
-      const ch = chItems.find((x) => (x.channel_name || '') === wantName)
-        || chItems.find((x) => (x.channel_name || '').endsWith(wantName.split('/').pop()));
-      if (ch) botCid = ch.cid;
-    }
-    if (!botCid) {
-      const bot = items.find((x) => x.client_nickname === '点歌机器人')
-        || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
-      if (bot) botCid = bot.cid;
-      botSeen = botSeen || !!bot;
-    }
-    if (!botCid) {
-      const voice = items.find((x) => String(x.client_type) !== '1');
-      if (voice && String(voice.cid) !== String(myCid) && voice.cid != null) botCid = voice.cid;
-    }
+    const { cid: botCid, botSeen } = resolveTargetCid(items, chItems, myCid);
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
     }
@@ -507,6 +491,48 @@ async function joinBotChannel() {
   } catch (e) {
     console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
   }
+}
+
+// 解析目标频道 cid：1) 已配置频道名/路径；2) 机器人昵称；3) 兜底第一个语音用户频道
+function resolveTargetCid(items, chItems, myCid) {
+  const wantName = (config.ts6mgrChannel || '').trim();
+  let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+  if (wantName) {
+    const leaf = wantName.split('/').pop();
+    const ch = chItems.find((x) => (x.channel_name || '') === wantName)
+      || chItems.find((x) => (x.channel_name || '').endsWith(leaf));
+    if (ch) return { cid: ch.cid, botSeen };
+  }
+  const bot = items.find((x) => x.client_nickname === '点歌机器人')
+    || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+  if (bot) return { cid: bot.cid, botSeen: true };
+  const voice = items.find((x) => String(x.client_type) !== '1');
+  if (voice && String(voice.cid) !== String(myCid) && voice.cid != null) return { cid: voice.cid, botSeen };
+  return { cid: null, botSeen };
+}
+
+// 轻量自检：若查询端已不在机器人所在频道，则自动跟过去。
+// 解决“切换频道后过一阵二者不在同一频道”的问题（查询端被服务器移动/重连错位）。
+async function ensureInBotChannel() {
+  if (state !== 'listening' || !conn) return;
+  try {
+    const who = await cmd('whoami');
+    const myClid = who.client_id != null ? who.client_id : who.clid;
+    const myCid = who.client_channel_id != null ? who.client_channel_id : who.cid;
+    const list = await cmd('clientlist -uid');
+    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+    const bot = items.find((x) => x.client_nickname === '点歌机器人')
+      || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+    if (bot && myClid && String(bot.cid) !== String(myCid)) {
+      await cmd('clientmove cid=' + bot.cid + ' clid=' + myClid);
+      console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + bot.cid);
+    }
+    // 重新订阅聊天事件，防止订阅被服务器静默取消导致收不到 !点歌
+    for (const ev of ['textchannel', 'textprivate', 'textserver']) {
+      try { await cmd('servernotifyregister event=' + ev); }
+      catch (e) { /* 忽略 */ }
+    }
+  } catch (e) { /* 忽略瞬时错误 */ }
 }
 async function bootstrap() {
   try {
@@ -524,6 +550,9 @@ async function bootstrap() {
     await joinBotChannel();
     bootstrapped = true;
     state = 'listening';
+    // 启动频道一致性自检：每 30s 检测一次，若与机器人不在同一频道则自动跟过去
+    if (reconcileTimer) clearInterval(reconcileTimer);
+    reconcileTimer = setInterval(() => { ensureInBotChannel(); }, 30000);
     console.log('[tschat] 已加入频道并监听 !点歌 命令 (昵称=' + nick + ')');
   } catch (e) {
     fail(e);
@@ -559,6 +588,7 @@ function teardown() {
   }
   try { conn && conn.end(); } catch (e) {}
   conn = null; stream = null; bootstrapped = false;
+  if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
 }
 
 // 面板保存配置后调用：按最新配置启/停/重连
