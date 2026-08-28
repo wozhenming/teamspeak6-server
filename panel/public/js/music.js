@@ -43,11 +43,19 @@ TSPages.music = async function () {
       .fee-playing{background:#e6f7ec;color:#18a058;margin:0 6px 0 0}
       tr.queue-now td{background:rgba(61,126,255,.10)}
       html[data-theme="light"] tr.queue-now td{background:rgba(37,99,235,.08)}
+      .ch-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
     </style>
     <div id="music-alert"></div>
 
+    <div class="card" id="ch-tabs-card" style="padding:10px 14px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <span class="muted" style="font-size:12px;flex:none">当前管理频道：</span>
+        <span id="ch-tabs" style="display:flex;flex-wrap:wrap;gap:6px"></span>
+      </div>
+    </div>
+
     <div class="card music-player" id="player-card">
-      <h3><span>正在播放</span>
+      <h3><span>正在播放 <span class="muted" id="player-ch-name"></span></span>
         <span class="muted" id="player-mode"></span>
       </h3>
       <div class="player-main">
@@ -88,7 +96,7 @@ TSPages.music = async function () {
             <button class="btn btn-sm btn-primary" id="btn-ts-channel-add">添加频道</button>
             <button class="btn btn-sm" id="btn-ts-refresh" title="保存 Key 并刷新频道列表">↻</button>
           </div>
-          <span class="muted" style="font-size:11px">所有频道的机器人播放同一路电台流（点歌队列共享，任一频道点歌全局生效）；移除频道后需在「机器人管理」删除对应机器人。</span>
+          <span class="muted" style="font-size:11px">每个频道的机器人播放自己频道的独立电台流（点歌队列互不相通，网易云账号全局共享）；移除频道后需在「机器人管理」删除对应机器人。</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <div class="muted" style="font-size:12px;font-weight:600">音质与行为</div>
@@ -186,7 +194,7 @@ TSPages.music = async function () {
     </div>
 
     <div class="card">
-      <h3><span>网易云点歌</span>
+      <h3><span>网易云点歌 <span class="muted" id="search-target"></span></span>
         <span>
           <button class="btn btn-sm" id="btn-login-refresh" title="刷新登录状态">↻</button>
           <button class="btn btn-sm" id="btn-login">扫码登录</button>
@@ -214,7 +222,7 @@ TSPages.music = async function () {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3><span>点歌队列 <span class="muted" id="queue-summary"></span></span>
+      <h3><span>点歌队列 <span class="muted" id="queue-ch-name"></span><span class="muted" id="queue-summary"></span></span>
         <button class="btn btn-sm btn-danger" id="btn-clear-queue">清空</button>
       </h3>
       <div class="list-toolbar">
@@ -299,11 +307,12 @@ TSPages.music = async function () {
 
   async function pollPlayer(force) {
     if (token !== TSUtils.navToken()) return;
+    if (!currentCh) return;
     const now = Date.now();
     if (!force && now - lastPollAt < 800) return;
     lastPollAt = now;
     try {
-      const d = await API.musicPlayer();
+      const d = await API.musicPlayer(currentCh);
       playerState = d;
       renderPlayer();
     } catch (e) { /* 服务不可用 */ }
@@ -512,20 +521,22 @@ TSPages.music = async function () {
         </div>`;
       box.querySelector('#pl-add-all').onclick = async () => {
         try {
-          const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
-          TSUtils.toast(`已加入 ${r.count} 首`, 'success');
+          if (!currentCh) { TSUtils.toast('请先选择部署频道', 'error'); return; }
+          const r = await API.musicEnqueueMany(currentCh, all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
+          TSUtils.toast(`已加入 ${r.count} 首到「' + currentCh.split('/').pop() + '」`, 'success');
           refreshQueue();
         } catch (err) { TSUtils.toast(err.message, 'error'); }
       };
       box.onclick = async (e) => {
         const btn = e.target.closest('button[data-ri]');
         if (!btn) return;
+        if (!currentCh) { TSUtils.toast('请先选择部署频道', 'error'); return; }
         const t = plRendered[Number(btn.dataset.ri)];
         if (!t) return;
         btn.disabled = true;
         try {
-          await API.musicEnqueue({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright });
-          TSUtils.toast('已加入点歌队列', 'success');
+          await API.musicEnqueue(currentCh, { id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright });
+          TSUtils.toast('已加入「' + currentCh.split('/').pop() + '」的点歌队列', 'success');
           refreshQueue();
         } catch (err) { TSUtils.toast(err.message, 'error'); }
       };
@@ -535,11 +546,17 @@ TSPages.music = async function () {
     render();
   }
 
-  // ---------- 队列 ----------
+  // ---------- 队列（当前管理频道） ----------
   async function refreshQueue() {
     if (token !== TSUtils.navToken()) return;
+    const box = $('queue-list');
+    if (!currentCh) {
+      $('queue-summary').textContent = '';
+      box.innerHTML = '<div class="empty">请先在「TeamSpeak 推流 → 部署频道」添加频道并部署机器人</div>';
+      return;
+    }
     try {
-      const d = await API.musicQueue(queuePage, queuePageSize, queueQ);
+      const d = await API.musicQueue(currentCh, queuePage, queuePageSize, queueQ);
       const items = d.items || [];
       $('queue-summary').textContent = queueQ ? `（筛选匹配 ${d.total} 首）` : `（共 ${d.total} 首）`;
       const box = $('queue-list');
@@ -575,8 +592,9 @@ TSPages.music = async function () {
   $('search-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { searchPage = 1; doSearch(); } });
   $('search-type').onchange = (e) => { searchType = e.target.value; searchPage = 1; };
   $('btn-clear-queue').onclick = async () => {
-    if (!confirm('确定清空点歌队列吗？')) return;
-    await API.musicClearQueue();
+    if (!currentCh) { TSUtils.toast('请先选择部署频道', 'error'); return; }
+    if (!confirm('确定清空「' + currentCh.split('/').pop() + '」的点歌队列吗？')) return;
+    await API.musicClearQueue(currentCh);
     queuePage = 1;
     refreshQueue();
   };
@@ -634,6 +652,37 @@ TSPages.music = async function () {
     if (!btn) return;
     deployChannels = deployChannels.filter((c) => c !== btn.dataset.rmch);
     await saveChannels();
+  });
+
+  // ---------- 频道页签：切换当前管理的频道（播放器/队列/点歌都只作用于该频道） ----------
+  let currentCh = null;
+
+  function renderChannelTabs() {
+    const box = $('ch-tabs');
+    if (!deployChannels.length) {
+      box.innerHTML = '<span class="muted" style="font-size:12px">未配置（先在下方「TeamSpeak 推流 → 部署频道」添加）</span>';
+    } else {
+      box.innerHTML = deployChannels.map((c) =>
+        `<button class="btn btn-sm ch-tab${c === currentCh ? ' active' : ''}" data-ch="${esc(c)}">${esc(c.split('/').pop())}</button>`).join('');
+    }
+    const leaf = currentCh ? currentCh.split('/').pop() : '';
+    $('player-ch-name').textContent = leaf ? '（频道：' + leaf + '）' : '';
+    $('queue-ch-name').textContent = leaf ? '（' + leaf + '）' : '';
+    $('search-target').textContent = leaf ? '（点歌加入：' + leaf + '）' : '';
+  }
+
+  function syncCurrentCh() {
+    if (!deployChannels.includes(currentCh)) currentCh = deployChannels[0] || null;
+    renderChannelTabs();
+  }
+
+  $('ch-tabs').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-ch]');
+    if (!b || b.dataset.ch === currentCh) return;
+    currentCh = b.dataset.ch;
+    renderChannelTabs();
+    await pollPlayer(true); // 先取该频道播放器状态，队列的“播放中”标注才准确
+    refreshQueue();
   });
 
   async function refreshTsStatus() {
@@ -711,13 +760,16 @@ TSPages.music = async function () {
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
         renderChannelList();
+        syncCurrentCh();
         return;
       }
       tsChannelsAvail = await API.musicTsChannels();
       renderChannelList();
+      syncCurrentCh();
     } catch (e) {
       sel.innerHTML = '<option value="">（加载失败：' + e.message + '）</option>';
       renderChannelList();
+      syncCurrentCh();
     }
   }
   // ↻ 先保存当前填写的 Key，再刷新频道列表
@@ -852,16 +904,18 @@ TSPages.music = async function () {
     if (!btn) return;
     try {
       if (btn.dataset.i != null) {
+        if (!currentCh) { TSUtils.toast('请先在上方选择部署频道', 'error'); return; }
         const s = searchResults[Number(btn.dataset.i)];
         if (!s) { TSUtils.toast('结果已过期，请重新搜索', 'error'); return; }
-        await API.musicEnqueue(s);
-        TSUtils.toast('已加入点歌队列', 'success');
+        await API.musicEnqueue(currentCh, s);
+        TSUtils.toast('已加入「' + currentCh.split('/').pop() + '」的点歌队列', 'success');
         refreshQueue();
       } else if (btn.dataset.pl) {
+        if (!currentCh) { TSUtils.toast('请先在上方选择部署频道', 'error'); return; }
         const tracks = await API.musicPlaylistTracksAll(btn.dataset.pl);
         if (!tracks.tracks || !tracks.tracks.length) { TSUtils.toast('歌单为空', 'error'); return; }
-        await API.musicEnqueueMany(tracks.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
-        TSUtils.toast(`已将歌单全部 ${tracks.tracks.length} 首加入队列`, 'success');
+        await API.musicEnqueueMany(currentCh, tracks.tracks.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
+        TSUtils.toast(`已将歌单全部 ${tracks.tracks.length} 首加入「' + currentCh.split('/').pop() + '」的队列`, 'success');
         refreshQueue();
       } else if (btn.dataset.view) {
         openPlaylistModal(btn.dataset.view, btn.dataset.name);
@@ -879,11 +933,11 @@ TSPages.music = async function () {
     if (!btn) return;
     try {
       if (btn.dataset.play != null) {
-        await API.musicPlay(parseInt(btn.dataset.play, 10));
+        await API.musicPlay(currentCh, parseInt(btn.dataset.play, 10));
         pollPlayer(true);
         TSUtils.toast('开始播放', 'success');
       } else if (btn.dataset.del != null) {
-        await API.musicDequeue(btn.dataset.del);
+        await API.musicDequeue(currentCh, btn.dataset.del);
       } else if (btn.classList.contains('pager-btn')) {
         queuePage = parseInt(btn.dataset.p, 10);
       }
@@ -894,25 +948,29 @@ TSPages.music = async function () {
     }
   });
 
-  // 播放器控制
-  $('btn-prev').onclick = async () => { await API.musicPrev(); pollPlayer(true); };
-  $('btn-next').onclick = async () => { await API.musicNext(); pollPlayer(true); };
-  $('btn-toggle').onclick = async () => { await API.musicToggle(); pollPlayer(true); };
+  // 播放器控制（作用于当前管理频道）
+  $('btn-prev').onclick = async () => { if (!currentCh) return; await API.musicPrev(currentCh); pollPlayer(true); };
+  $('btn-next').onclick = async () => { if (!currentCh) return; await API.musicNext(currentCh); pollPlayer(true); };
+  $('btn-toggle').onclick = async () => { if (!currentCh) return; await API.musicToggle(currentCh); pollPlayer(true); };
   $('btn-loop').onclick = async () => {
+    if (!currentCh) return;
     const order = ['all', 'one', 'shuffle', 'off'];
     const next = order[(order.indexOf(playerState.loopMode) + 1) % order.length];
-    await API.musicLoop(next);
+    await API.musicLoop(currentCh, next);
     pollPlayer(true);
   };
   $('player-range').addEventListener('input', () => { seeking = true; });
   $('player-range').addEventListener('change', async () => {
+    if (!currentCh) { seeking = false; return; }
     const pos = parseInt($('player-range').value, 10) || 0;
     seeking = false;
-    try { await API.musicSeek(pos); } catch (e) { /* 忽略 */ }
+    try { await API.musicSeek(currentCh, pos); } catch (e) { /* 忽略 */ }
     pollPlayer(true);
   });
 
   await refreshLogin();
+  await loadTsChannels(); // 先拿到部署频道列表并确定当前管理频道
+  refreshTsStatus();
   await pollPlayer(true); // 先取播放器状态，队列首次渲染即可标注“正在播放”
   await refreshQueue();
   startTick();

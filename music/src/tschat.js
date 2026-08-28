@@ -135,17 +135,17 @@ function extractSongId(text) {
   return null;
 }
 
-// ---------- 与队列/播放器对接 ----------
+// ---------- 与队列/播放器对接（全部按会话所在频道隔离） ----------
 
-// 确保正在播放：只要当前没在放，就开播（队列空则从头/继续）
-function ensurePlaying() {
-  const st = player.get();
+// 确保某频道正在播放：只要该频道当前没在放，就开播（队列空则从头/继续）
+function ensurePlaying(channel) {
+  const st = player.forChannel(channel).get();
   if (st.playing) return;
-  if (!st.current) player.play();
-  else player.resume();
+  if (!st.current) player.forChannel(channel).play();
+  else player.forChannel(channel).resume();
 }
 
-async function addSong(body, invokerName, reply) {
+async function addSong(body, invokerName, reply, channel) {
   const songId = extractSongId(body);
   if (!songId) {
     reply('用法：!点歌 <歌曲ID 或 网易云链接>');
@@ -158,7 +158,8 @@ async function addSong(body, invokerName, reply) {
       detail = d && d.songs && d.songs[0];
     } catch (e) { /* 详情失败仍可尝试入队最小信息 */ }
     if (!detail) detail = { id: songId, name: '歌曲 ' + songId };
-    queue.enqueue({
+    const q = queue.forChannel(channel);
+    q.enqueue({
       name: detail.name,
       songId: songId,
       artists: (detail.ar || []).map((a) => a.name).join(' '),
@@ -167,52 +168,52 @@ async function addSong(body, invokerName, reply) {
       duration: detail.dt ? Math.round(detail.dt / 1000) : 0,
       fee: detail.fee != null ? detail.fee : null,
     }, (invokerName || 'TS用户') + '(TS)');
-    ensurePlaying(); // 队列为空或未在播放时自动开播
-    const pos = queue.all().length;
-    reply('✔ 已加入队列：' + detail.name + '（第 ' + pos + ' 位）');
+    ensurePlaying(channel); // 队列为空或未在播放时自动开播
+    const pos = q.all().length;
+    reply('✔ 已加入本频道队列：' + detail.name + '（第 ' + pos + ' 位）');
   } catch (e) {
     reply('✖ 点歌失败：' + e.message);
   }
 }
 
-function runControl(cmdName, invokerName, arg, reply) {
+function runControl(cmdName, invokerName, arg, reply, channel) {
   try {
-    const st = player.get();
+    const st = player.forChannel(channel).get();
     if (cmdName === 'play') {
       const at = parsePosition(arg);
-      if (at) { runPlayAt(at, invokerName, reply); return; }
-      if (!st.current) player.play();
-      else player.resume();
-      require('./tsbridge').resumeRadio().catch(() => {});
+      if (at) { runPlayAt(at, invokerName, reply, channel); return; }
+      if (!st.current) player.forChannel(channel).play();
+      else player.forChannel(channel).resume();
+      require('./tsbridge').resumeRadio(channel).catch(() => {});
       reply(st.current && st.current.title ? '▶ 已继续播放：' + st.current.title : '▶ 已开始播放');
     } else if (cmdName === 'pause') {
-      player.pause();
+      player.forChannel(channel).pause();
       reply('⏸ 已暂停');
     } else if (cmdName === 'next') {
-      const r = player.next();
+      const r = player.forChannel(channel).next();
       const cur = r && r.current;
       reply(cur ? '⏭ 已切歌：' + cur.title : '队列末尾/为空，无法继续切');
       // 切歌后主动重新向 ts6-manager 下达 play-radio：即便它此前因流空档报
       // “Queue empty” 停掉了点歌机器人，也能立即恢复拉流，避免掉线。
-      require('./tsbridge').resumeRadio().catch(() => {});
+      require('./tsbridge').resumeRadio(channel).catch(() => {});
     } else if (cmdName === 'clear') {
-      runClear(invokerName, reply);
+      runClear(invokerName, reply, channel);
     } else if (cmdName === 'search') {
       runSearch(arg || '', invokerName, reply);
     } else if (cmdName === 'queue') {
-      runQueue(arg || '', invokerName, reply);
+      runQueue(arg || '', invokerName, reply, channel);
     }
   } catch (e) {
     reply('✖ 操作失败：' + e.message);
   }
 }
 
-// 清空点歌队列（并停止当前播放，emitChange(null) 会触发 player 停止）
-function runClear(invokerName, reply) {
+// 清空本频道点歌队列（并停止当前播放，emitChange(null) 会触发 player 停止）
+function runClear(invokerName, reply, channel) {
   try {
-    const n = queue.all().length;
-    queue.clear();
-    reply(n ? ('🧹 已清空点歌队列（' + n + ' 首）') : '队列本来就是空的');
+    const n = queue.forChannel(channel).all().length;
+    queue.forChannel(channel).clear();
+    reply(n ? ('🧹 已清空本频道点歌队列（' + n + ' 首）') : '队列本来就是空的');
   } catch (e) {
     reply('✖ 清空失败：' + e.message);
   }
@@ -228,26 +229,26 @@ function parsePosition(text) {
 }
 
 // 跳播队列指定位置（1 基）：!播放第3首 / !播3 / !跳3 / !播放 3
-function runPlayAt(n, invokerName, reply) {
-  const all = queue.all();
+function runPlayAt(n, invokerName, reply, channel) {
+  const all = queue.forChannel(channel).all();
   if (!all.length) return reply('队列为空，用 !点歌 <ID> 添加歌曲');
   if (!Number.isInteger(n) || n < 1 || n > all.length) {
     return reply('✖ 队列只有 ' + all.length + ' 首，无法播放第 ' + n + ' 首');
   }
   const item = all[n - 1];
-  const res = player.play(item.id);
+  const res = player.forChannel(channel).play(item.id);
   const played = res.current || item;
-  require('./tsbridge').resumeRadio().catch(() => {});
+  require('./tsbridge').resumeRadio(channel).catch(() => {});
   reply('▶ 已跳播第 ' + n + ' 首：' + (played.title || played.name) + (played.artists ? ' - ' + played.artists : ''));
 }
 
-// 查看播放队列（分页，每页最多 10 首）：!队列 [页码]
-function runQueue(arg, invokerName, reply) {
-  const all = queue.all();
+// 查看本频道播放队列（分页，每页最多 10 首）：!队列 [页码]
+function runQueue(arg, invokerName, reply, channel) {
+  const all = queue.forChannel(channel).all();
   const total = all.length;
   const pageSize = 10;
   const pages = Math.max(1, Math.ceil(total / pageSize));
-  const cur = player.get().current;
+  const cur = player.forChannel(channel).get().current;
   const curId = cur ? cur.id : null;
   // 未指定页码时，默认定位到“当前正在播放的歌曲”所在页
   let defaultPage = 1;
@@ -271,7 +272,7 @@ function runQueue(arg, invokerName, reply) {
     const sid = s.songId || s.id;
     return mark + idx + '. ' + s.title + artists + '  (ID:' + sid + ')';
   });
-  let msg = '📜 播放队列（共 ' + total + ' 首，第 ' + page + '/' + pages + ' 页）\n' + lines.join('\n');
+  let msg = '📜 本频道播放队列（共 ' + total + ' 首，第 ' + page + '/' + pages + ' 页）\n' + lines.join('\n');
   if (pages > 1) {
     msg += '\n!队列 ' + (page < pages ? (page + 1) : 1) + ' 查看' + (page < pages ? '下一页' : '首页');
   }
@@ -329,30 +330,30 @@ function cmdEnabled(name) {
   return cmds[name] !== false;
 }
 
-function runLoop(arg, invokerName, reply) {
+function runLoop(arg, invokerName, reply, channel) {
   try {
     const a = (arg || '').trim().toLowerCase();
     let mode = LOOP_MODES[a];
-    let cur = player.get().loopMode;
+    let cur = player.forChannel(channel).get().loopMode;
     if (!mode) {
       if (a) { reply('循环模式：!循环 <列表|单曲|随机|关>（当前：' + (LOOP_LABEL[cur] || cur) + '）'); return; }
       const order = ['all', 'one', 'shuffle', 'off'];
       mode = order[(order.indexOf(cur) + 1) % order.length]; // 不给参数则循环切换
     }
-    player.setLoop(mode);
-    reply('循环模式 → ' + (LOOP_LABEL[player.get().loopMode] || player.get().loopMode));
+    player.forChannel(channel).setLoop(mode);
+    reply('循环模式 → ' + (LOOP_LABEL[player.forChannel(channel).get().loopMode] || player.forChannel(channel).get().loopMode));
   } catch (e) {
     reply('✖ 切换循环失败：' + e.message);
   }
 }
 
-// !状态：正在播放 / 下一首 / 播放与循环状态
+// !状态：本频道正在播放 / 下一首 / 播放与循环状态
 const STATUS_WORDS = { 状态: 1, now: 1, 当前: 1, playing: 1, 正在播放: 1 };
 function mm(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
-function runStatus(invokerName, reply) {
+function runStatus(invokerName, reply, channel) {
   try {
-    const st = player.get();
-    const all = queue.all();
+    const st = player.forChannel(channel).get();
+    const all = queue.forChannel(channel).all();
     const cur = st.current;
     let nowTxt = '无';
     if (cur) {
@@ -373,9 +374,10 @@ function runStatus(invokerName, reply) {
 }
 
 const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', playat: 'playat' };
-function handleRequest(rawText, invokerName, reply) {
+function handleRequest(rawText, invokerName, reply, channel) {
   const text = (rawText || '').trim();
   if (!text) return;
+  channel = channel || 'default';
   const ctl = text.match(/^!\s*(\S+)\s*(.*)$/);
   if (ctl) {
     const w = ctl[1].toLowerCase();
@@ -383,29 +385,29 @@ function handleRequest(rawText, invokerName, reply) {
     if (CTRL_MAP[w]) {
       const name = CMD_NAME[CTRL_MAP[w]];
       if (!cmdEnabled(name)) return reply('该指令已被管理员禁用');
-      runControl(CTRL_MAP[w], invokerName, rest, reply);
+      runControl(CTRL_MAP[w], invokerName, rest, reply, channel);
       return;
     }
     if (LOOP_WORDS[w]) {
       if (!cmdEnabled('loop')) return reply('循环指令已被管理员禁用');
-      runLoop(rest, invokerName, reply);
+      runLoop(rest, invokerName, reply, channel);
       return;
     }
     if (STATUS_WORDS[w]) {
       if (!cmdEnabled('status')) return reply('状态指令已被管理员禁用');
-      runStatus(invokerName, reply);
+      runStatus(invokerName, reply, channel);
       return;
     }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
       if (!cmdEnabled('dian')) return reply('点歌指令已被管理员禁用');
-      addSong(rest, invokerName, reply);
+      addSong(rest, invokerName, reply, channel);
       return;
     }
     // 跳播队列第 N 首：!播放第3首 / !播3 / !跳3 / !第3首 / !play3
     const playAtMatch = text.match(/^!\s*(?:播|播放|跳|选|放|第|play|jump|goto|select|p)\s*第?\s*(\d+)\s*(?:首|位|个|song)?\s*$/i);
     if (playAtMatch) {
       if (!cmdEnabled('playat')) return reply('该指令已被管理员禁用');
-      runPlayAt(parseInt(playAtMatch[1], 10), invokerName, reply);
+      runPlayAt(parseInt(playAtMatch[1], 10), invokerName, reply, channel);
       return;
     }
     reply('可用指令：!点歌 <歌曲ID或链接> · !播放(第N首) · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !循环 · !状态');
@@ -414,7 +416,7 @@ function handleRequest(rawText, invokerName, reply) {
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
   if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) {
     if (!cmdEnabled('dian')) return;
-    addSong(text, invokerName, reply);
+    addSong(text, invokerName, reply, channel);
   }
 }
 
@@ -426,7 +428,8 @@ function dispatchLine(session, line) {
     const invName = (p.invokername || '').trim();
     // 仅忽略“自己发出的回执”（按本会话昵称判断，最可靠）
     if (invName && invName === session.nick) return;
-    handleRequest(p.msg || '', invName || '?', (msg) => reply(session, msg));
+    // 指令只作用于本会话所在频道的队列/播放器
+    handleRequest(p.msg || '', invName || '?', (msg) => reply(session, msg), session.channel);
     return;
   }
   const head = session.pending[0];

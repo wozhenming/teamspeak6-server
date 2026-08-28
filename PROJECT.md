@@ -20,8 +20,9 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**核心链路（音频）**：面板点歌 → `music` 队列/播放器 → `/api/stream` 实时转码 MP3 小广播
-电台流 → `backend`(ts6-manager) 的音乐机器人作为真实语音客户端拉流 → 推进 TeamSpeak 频道。
+**核心链路（音频）**：面板/频道聊天点歌 → 对应频道的 `music` 队列/播放器 → `/api/stream?ch=<频道>`
+实时转码 MP3 小广播电台流 → `backend`(ts6-manager) 中该频道的音乐机器人拉流 → 推进 TeamSpeak 频道。
+**网易云账号全局共享，队列/播放器/机器人/点歌助手按频道隔离。**
 
 ---
 
@@ -41,11 +42,18 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 - **退出**：`/logout` + 清空本地 jar。
 
 ### 2. 点歌队列与播放器（music/src/queue.js, player.js, index.js）
-- `queue.js`：内存 + 持久化 `queue.json`；**每个条目保留网易云真实 `songId`**（早期丢 ID 是无声根因）。
-- `player.js`：播放/暂停/继续/切歌/进度/循环(列表/单曲/随机/关)状态机；持久化 `player.json`。
-- 播放/暂停/seek/切歌都会 **`rev++`**，驱动电台流按需重启转码进程。
+- **每频道一套独立队列与播放器**：`queue.forChannel(ch)` / `player.forChannel(ch)` 实例注册表；
+  独立持久化 `queue_<key>.json` / `player_<key>.json`（key 由频道路径哈希）；旧版单队列
+  `queue.json` 启动时自动迁移到第一个部署频道。
+- **每个条目保留网易云真实 `songId`**（早期丢 ID 是无声根因）；`songIdCache` 按「频道:条目id」
+  命名空间，避免不同频道队列 id 撞车；直链缓存 `urlCache` 全局共享（同一网易云账号）。
+- `player.js`：播放/暂停/继续/切歌/进度/循环(列表/单曲/随机/关)状态机（每频道独立指针/进度/循环）。
+- 播放/暂停/seek/切歌都会 **`rev++`**（频道内独立计数），驱动该频道电台流按需重启转码进程。
+- 所有队列/播放器 REST 接口都带 `?ch=<频道路径>`（缺省取第一个部署频道）。
 
-### 3. 电台音频流（music/src/index.js `/api/stream`）
+### 3. 电台音频流（music/src/index.js `/api/stream?ch=<频道>`）
+- **每频道一路独立流**：`?ch=` 指定频道，泵循环读取该频道的队列/播放器状态；
+  各频道的播放/暂停/切歌互不影响。
 - **ffmpeg 实时转码**为稳定 MP3(128kbps/44.1k)，`-re` 按原速推送（避免机器人把流当文件缓存造成回跳）。
 - **真实时长探测**：用 `ffprobe` 探测直链文件真实时长，修正队列/自动切歌（试听/版权截断比元数据短）。
 - **空闲静音保底**：无歌/暂停时回放**预生成的 32kbps 静音缓冲**，电台流永不断流（否则机器人掉线）。
@@ -61,20 +69,22 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 - **每频道固定部署**：面板配置部署频道列表（`ts6mgrChannels`），每个频道固定一个点歌机器人 +
   一个点歌助手，绑定后**不跨频道移动**（频道→botId 持久化在 `ts6mgrChannelBots`）。
   机器人命名：单频道用配置昵称原名，多频道自动加「·频道名」后缀；点歌助手同规则。
+- **每频道一路电台**：`ensureStation(token, scId, channel)` 按 `?ch=<频道>` 建独立电台 URL，
+  该频道的机器人只拉自己频道的流。
 - 自动建连：`ensureAdmin`（自动登录/创建 ts6-manager 管理员）、`ensureServer`（自动创建指向本
   TS 的连接，**指纹变化才 PUT**，避免切页触发连接池重置）、`ensureBotForChannel`（按绑定/名字
   复用，不重复建）、`ensureStation`（所有机器人共用一路电台流，队列全局共享）。
 - **看门狗自愈**（15s）：逐频道检查机器人在线，掉线自动 start+play-radio；同时执行
-  「所有部署频道都无人 → 自动暂停，任一频道有人 → 自动恢复」（按 clients 端点 client_type
-  只统计真实语音用户，排除机器人自身与 ServerQuery 客户端）。
+  「频道无人 → 只暂停该频道的播放器，有人进入 → 只恢复该频道」（按 clients 端点 client_type
+  只统计真实语音用户，排除机器人自身与 ServerQuery 客户端；各频道互不影响）。
 - JWT **token 缓存 10 分钟**(401 自动重登)，避免轮询/切页反复登录撞 auth 限流。
 
 ### 5. TS 频道聊天点歌（music/src/tschat.js）★核心特色
 - **每频道一个点歌助手**：每个部署频道各一条独立 SSH ServerQuery 连接（`shell(false)` 无伪
   终端，**等 TS3 横幅后才发命令**），启动后**驻留自己的频道**并订阅 `textchannel/textprivate`
   （textserver 仅挂在第一个会话上避免多助手重复应答），固定不移动。
-- **指令**（支持中/英文，面板可逐项开启/关闭；全局队列，任一频道点歌全局生效）：
-  - `!点歌 <歌曲ID|网易云链接>`（或裸 ID/链接）→ 自动提取 ID 入队并自动开播
+- **指令**（支持中/英文，面板可逐项开启/关闭；**只作用于本频道自己的队列/播放器**）：
+  - `!点歌 <歌曲ID|网易云链接>`（或裸 ID/链接）→ 自动提取 ID 入本频道队列并自动开播
   - `!播放(第N首)`/`!继续`、`!暂停`、`!切歌`/`!下一首`、`!清队列`、`!搜索`、`!队列 [页码]`、
     `!循环 <列表|单曲|随机|关>`、`!状态`
 - 每会话独立命令 FIFO；错峰连接（1.5s/个）防查询洪水限制；断线自动重连；昵称冲突自愈；
@@ -121,9 +131,9 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 
 **点歌机器人 API（`http://music:3200`）**
 - `/api/status` 登录状态（含 profile/vip）
-- `/api/player/*` 播放器控制（play/pause/resume/toggle/seek/next/prev/loop）
-- `/api/queue` 队列增删查
-- `/api/stream?t=<TOKEN>` 电台音频流
+- `/api/player/*?ch=<频道>` 播放器控制（play/pause/resume/toggle/seek/next/prev/loop）
+- `/api/queue?ch=<频道>` 队列增删查
+- `/api/stream?ch=<频道>&t=<TOKEN>` 该频道的电台音频流
 - `/api/ts-bot/config`+`/link`+`/unlink`+`/channels`+`/chat/status` ts6-manager 对接与设置
 
 **TS 频道聊天指令**

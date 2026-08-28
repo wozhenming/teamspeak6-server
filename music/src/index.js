@@ -7,8 +7,8 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 const { config } = require('./config');
 const enhanced = require('./enhanced');
-const queue = require('./queue');
-const player = require('./player');
+const queueMod = require('./queue');
+const playerMod = require('./player');
 const tsbridge = require('./tsbridge');
 const tschat = require('./tschat');
 
@@ -21,6 +21,15 @@ function ok(res, data) {
 }
 function fail(res, status, code, message) {
   res.status(status).json({ ok: false, error: { code, message } });
+}
+
+// 解析请求目标频道：query/body 的 ch 必须在已配置部署频道里，缺省取第一个。
+// 未配置任何频道返回 null（调用方返回 400）。
+function chOf(req) {
+  const channels = tsbridge.configChannels();
+  const want = String((req.query && req.query.ch) || (req.body && req.body.ch) || '').trim();
+  if (want && channels.includes(want)) return want;
+  return channels[0] || null;
 }
 
 // ---------- 图片代理（绕过网易云外链防盗链 / 混合内容限制） ----------
@@ -72,11 +81,12 @@ app.get('/api/img', async (req, res) => {
 });
 
 // ---------- 连续电台流（供 ts6-manager 音乐机器人作为电台源拉流） ----------
-// 把当前点歌队列当作“网络电台”持续输出：逐首解析网易云直链并管道输出，
-// 一曲结束后自动下一首；用户在面板切歌/暂停时本流自动跟随。
+// 把对应频道的点歌队列当作“网络电台”持续输出：逐首解析网易云直链并管道输出，
+// 一曲结束后自动下一首；用户在面板/频道聊天切歌/暂停时本流自动跟随。
+// 每个部署频道一路独立流：/api/stream?ch=<频道路径>（队列/播放器按频道隔离）。
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const songIdCache = {}; // 队列条目内部 id -> 网易云歌曲 id（旧数据自愈用）
-const urlCache = new Map(); // 网易云歌曲 id -> { url, at }（直链缓存，避免 seek/恢复时反复请求）
+const songIdCache = {}; // <频道key>:<队列条目id> -> 网易云歌曲 id（旧数据自愈用）
+const urlCache = new Map(); // 网易云歌曲 id -> { url, at }（直链缓存，账号全局共享，避免 seek/恢复时反复请求）
 const URL_TTL = 8 * 60 * 1000;
 let SILENCE_BUF = null; // 预生成的静音 MP3（约2秒，32kbps），暂停/空闲直接回放，零延迟零毛刺
 
@@ -115,6 +125,10 @@ app.get('/api/stream', async (req, res) => {
   if (config.streamTokenEnabled && config.streamToken && req.query.t !== config.streamToken) {
     return res.status(403).end('forbidden');
   }
+  const ch = chOf(req);
+  if (!ch) return res.status(404).end('no channel configured');
+  const player = playerMod.forChannel(ch);
+  const queue = queueMod.forChannel(ch);
   res.set('Content-Type', 'audio/mpeg');
   res.set('Cache-Control', 'no-cache');
   res.set('Connection', 'keep-alive');
@@ -190,15 +204,16 @@ app.get('/api/stream', async (req, res) => {
         if (!st.playing) { failCount = 0; await sleep(200); continue; }
 
         const cur = st.current;
-        const curKey = cur.id;
+        const curKey = cur.id; // 本流内曲目同一性标识（与 player 状态比较用）
+        const cacheKey = queueMod.channelKey(ch) + ':' + cur.id; // songIdCache 按频道命名空间，避免不同频道队列 id 撞车
         // 取网易云真实歌曲 ID：新条目存了 songId；旧持久化条目按“标题+歌手”搜索自愈
-        let neteaseId = cur.songId || songIdCache[curKey] || null;
+        let neteaseId = cur.songId || songIdCache[cacheKey] || null;
         if (!neteaseId) {
           try {
             const kw = [cur.title, cur.artists].filter(Boolean).join(' ');
             const r = kw ? await enhanced.search(kw, 'song', 1, 0) : null;
             const first = r && r.songs && r.songs[0];
-            if (first) { songIdCache[curKey] = first.id; neteaseId = first.id; }
+            if (first) { songIdCache[cacheKey] = first.id; neteaseId = first.id; }
           } catch (e) { /* 搜索失败走跳过 */ }
         }
 
@@ -542,9 +557,11 @@ app.get('/api/playlist/tracks-all', async (req, res) => {
   } catch (e) { fail(res, 502, 'PLAYLIST_FAIL', e.message); }
 });
 
-// ---------- 点歌队列 ----------
+// ---------- 点歌队列（按频道隔离，?ch= 指定） ----------
 app.get('/api/queue', (req, res) => {
-  const all = queue.all();
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  const all = queueMod.forChannel(ch).all();
   const q = (req.query.q || '').toString().trim().toLowerCase();
   const filtered = q
     ? all.filter((it) =>
@@ -562,18 +579,22 @@ app.get('/api/queue', (req, res) => {
     page,
     pageSize,
     pages,
+    channel: ch,
   });
 });
 
 app.post('/api/queue', (req, res) => {
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
   const body = req.body || {};
+  const q = queueMod.forChannel(ch);
   if (Array.isArray(body.songs) && body.songs.length) {
-    const added = queue.enqueueMany(body.songs, body.requestedBy);
-    ok(res, { items: added, count: added.length });
+    const added = q.enqueueMany(body.songs, body.requestedBy);
+    ok(res, { items: added, count: added.length, channel: ch });
   } else {
     const s = body;
     if (!s.id || !s.name) return fail(res, 400, 'BAD_REQUEST', '缺少歌曲信息');
-    const item = queue.enqueue({
+    const item = q.enqueue({
       id: s.id,
       name: s.name,
       artists: s.artists || '',
@@ -582,73 +603,98 @@ app.post('/api/queue', (req, res) => {
       duration: s.duration || 0,
       fee: s.fee != null ? s.fee : null,
     }, s.requestedBy);
-    ok(res, { item });
+    ok(res, { item, channel: ch });
   }
 });
 
 app.delete('/api/queue/:id', (req, res) => {
-  const removed = queue.remove(req.params.id);
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  const removed = queueMod.forChannel(ch).remove(req.params.id);
   if (!removed) return fail(res, 404, 'NOT_FOUND', '队列中无此条目');
   ok(res, { removed: true });
 });
 
 app.delete('/api/queue', (req, res) => {
-  queue.clear();
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  queueMod.forChannel(ch).clear();
   ok(res, { cleared: true });
 });
 
-// ---------- 播放器 ----------
+// ---------- 播放器（按频道隔离，?ch= 指定） ----------
 app.get('/api/player', (req, res) => {
-  ok(res, player.get());
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  ok(res, { ...playerMod.forChannel(ch).get(), channel: ch });
 });
 
 app.post('/api/player/play', (req, res) => {
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
   const id = req.body && req.body.id != null ? parseInt(req.body.id, 10) : null;
-  ok(res, player.play(id));
+  ok(res, { ...playerMod.forChannel(ch).play(id), channel: ch });
 });
 
 app.post('/api/player/toggle', (req, res) => {
-  const st = player.toggle();
-  ok(res, st);
-  if (st.playing) tsbridge.resumeRadio().catch(() => {});
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  const st = playerMod.forChannel(ch).toggle();
+  ok(res, { ...st, channel: ch });
+  if (st.playing) tsbridge.resumeRadio(ch).catch(() => {});
 });
 
 app.post('/api/player/pause', (req, res) => {
-  ok(res, player.pause());
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  ok(res, { ...playerMod.forChannel(ch).pause(), channel: ch });
 });
 
 app.post('/api/player/resume', (req, res) => {
-  const st = player.resume();
-  ok(res, st);
-  if (st.playing) tsbridge.resumeRadio().catch(() => {});
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  const st = playerMod.forChannel(ch).resume();
+  ok(res, { ...st, channel: ch });
+  if (st.playing) tsbridge.resumeRadio(ch).catch(() => {});
 });
 
 app.post('/api/player/seek', (req, res) => {
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
   const pos = Number(req.body && req.body.position);
   if (!Number.isFinite(pos) || pos < 0) return fail(res, 400, 'BAD_REQUEST', 'position 无效');
-  ok(res, player.seek(pos));
+  ok(res, { ...playerMod.forChannel(ch).seek(pos), channel: ch });
 });
 
 app.post('/api/player/next', (req, res) => {
-  ok(res, player.next());
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  ok(res, { ...playerMod.forChannel(ch).next(), channel: ch });
 });
 
 app.post('/api/player/prev', (req, res) => {
-  ok(res, player.prev());
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
+  ok(res, { ...playerMod.forChannel(ch).prev(), channel: ch });
 });
 
 app.post('/api/player/loop', (req, res) => {
+  const ch = chOf(req);
+  if (!ch) return fail(res, 400, 'NO_CHANNEL', '未配置部署频道');
   const mode = (req.body && req.body.mode) || 'all';
-  ok(res, player.setLoop(mode));
+  ok(res, { ...playerMod.forChannel(ch).setLoop(mode), channel: ch });
 });
 
 // 语音播放输出接口（预留）：后续接入 TS6 语音客户端后在此实现
 // app.post('/api/play/start', ...)
 
 fs.mkdirSync(config.dataDir, { recursive: true });
-queue.load();
-player.load();
-queue.onChange(player.onQueueChanged);
+// 每个部署频道预建队列/播放器并加载持久化数据；旧版单队列迁移到第一个频道
+const bootChannels = tsbridge.configChannels();
+if (bootChannels.length) {
+  queueMod.migrateLegacy(bootChannels[0]);
+  for (const c of bootChannels) playerMod.forChannel(c);
+}
 
 // ---------- 自动解析电台流对外地址（逻辑见 streamurl.js，支持建机器人时再次探测） ----------
 const { resolveStreamPublicUrl } = require('./streamurl');

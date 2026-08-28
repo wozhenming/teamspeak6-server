@@ -88,22 +88,23 @@ const API = (function () {
     musicSearch: (q, type, limit, offset) => request('GET', `/api/music/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit || 20}&offset=${offset || 0}`),
     musicPlaylistTracks: (id, limit) => request('GET', `/api/music/playlist/tracks?id=${id}&limit=${limit || 30}`),
     musicPlaylistTracksAll: (id, cap) => request('GET', `/api/music/playlist/tracks-all?id=${id}&cap=${cap || 2000}`),
-    musicQueue: (page, pageSize, q) => request('GET', `/api/music/queue?page=${page || 1}&pageSize=${pageSize || 10}&q=${encodeURIComponent(q || '')}`),
-    musicEnqueue: (song) => request('POST', '/api/music/queue', song),
-    musicEnqueueMany: (songs, requestedBy) => request('POST', '/api/music/queue', { songs, requestedBy }),
-    musicDequeue: (id) => request('DELETE', `/api/music/queue/${id}`),
-    musicClearQueue: () => request('DELETE', '/api/music/queue'),
+    // 点歌队列/播放器（按频道隔离，ch = 部署频道路径）
+    musicQueue: (ch, page, pageSize, q) => request('GET', `/api/music/queue?ch=${encodeURIComponent(ch || '')}&page=${page || 1}&pageSize=${pageSize || 10}&q=${encodeURIComponent(q || '')}`),
+    musicEnqueue: (ch, song) => request('POST', '/api/music/queue', { ...song, ch }),
+    musicEnqueueMany: (ch, songs, requestedBy) => request('POST', '/api/music/queue', { ch, songs, requestedBy }),
+    musicDequeue: (ch, id) => request('DELETE', `/api/music/queue/${id}?ch=${encodeURIComponent(ch || '')}`),
+    musicClearQueue: (ch) => request('DELETE', `/api/music/queue?ch=${encodeURIComponent(ch || '')}`),
 
-    // 播放器
-    musicPlayer: () => request('GET', '/api/music/player'),
-    musicPlay: (id) => request('POST', '/api/music/player/play', { id }),
-    musicToggle: () => request('POST', '/api/music/player/toggle'),
-    musicPause: () => request('POST', '/api/music/player/pause'),
-    musicResume: () => request('POST', '/api/music/player/resume'),
-    musicSeek: (position) => request('POST', '/api/music/player/seek', { position }),
-    musicNext: () => request('POST', '/api/music/player/next'),
-    musicPrev: () => request('POST', '/api/music/player/prev'),
-    musicLoop: (mode) => request('POST', '/api/music/player/loop', { mode }),
+    // 播放器（按频道隔离）
+    musicPlayer: (ch) => request('GET', `/api/music/player?ch=${encodeURIComponent(ch || '')}`),
+    musicPlay: (ch, id) => request('POST', `/api/music/player/play?ch=${encodeURIComponent(ch || '')}`, { id }),
+    musicToggle: (ch) => request('POST', `/api/music/player/toggle?ch=${encodeURIComponent(ch || '')}`),
+    musicPause: (ch) => request('POST', `/api/music/player/pause?ch=${encodeURIComponent(ch || '')}`),
+    musicResume: (ch) => request('POST', `/api/music/player/resume?ch=${encodeURIComponent(ch || '')}`),
+    musicSeek: (ch, position) => request('POST', `/api/music/player/seek?ch=${encodeURIComponent(ch || '')}`, { position }),
+    musicNext: (ch) => request('POST', `/api/music/player/next?ch=${encodeURIComponent(ch || '')}`),
+    musicPrev: (ch) => request('POST', `/api/music/player/prev?ch=${encodeURIComponent(ch || '')}`),
+    musicLoop: (ch, mode) => request('POST', `/api/music/player/loop?ch=${encodeURIComponent(ch || '')}`, { mode }),
 
     // 点歌机器人接入 TeamSpeak（ts6-manager）
     musicTsStatus: () => request('GET', '/api/music/ts-bot/status'),

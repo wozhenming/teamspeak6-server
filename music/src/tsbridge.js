@@ -13,7 +13,7 @@
 const crypto = require('crypto');
 const { config } = require('./config');
 const { ensureStreamPublicUrl } = require('./streamurl');
-const player = require('./player');
+const playerMod = require('./player');
 
 // 管理员 token 缓存：避免面板每次轮询/切页都重新登录（auth 接口有 15次/15分钟 限流）
 let tokenCache = { token: null, user: null, at: 0 };
@@ -224,23 +224,29 @@ async function listChannels() {
   return channels;
 }
 
-async function ensureStation(token, serverConfigId) {
+// 每个频道一路独立电台流（网易云账号全局共享，队列/播放器按频道隔离）：
+// /api/stream?ch=<频道路路径>&t=<token>
+function stationUrlFor(channel) {
   const c = cfg();
-  // ts6-manager 的电台 URL 需附上令牌，且必须是“对 ts6-manager 可达且非内网”的地址
   const sep = c.streamUrl.includes('?') ? '&' : '?';
-  const tok = c.streamTokenEnabled && c.streamToken ? c.streamToken : '';
-  const streamUrl = tok ? (c.streamUrl + sep + 't=' + encodeURIComponent(tok)) : c.streamUrl;
+  let url = c.streamUrl + sep + 'ch=' + encodeURIComponent(channel);
+  if (c.streamTokenEnabled && c.streamToken) url += '&t=' + encodeURIComponent(c.streamToken);
+  return url;
+}
+
+async function ensureStation(token, serverConfigId, channel) {
+  const url = stationUrlFor(channel);
   const { status, json } = await authFetch('GET', '/api/servers/' + serverConfigId + '/radio-stations', token);
   const stations = (json.data && json.data.stations) || json.data || json || [];
-  const existing = Array.isArray(stations) ? stations.find((s) => s && s.url === streamUrl) : null;
+  const existing = Array.isArray(stations) ? stations.find((s) => s && s.url === url) : null;
   if (existing) return existing.id;
   const created = await authFetch('POST', '/api/servers/' + serverConfigId + '/radio-stations', token, {
-    name: '点歌机器人',
-    url: streamUrl,
+    name: botNameFor(channel),
+    url,
     genre: '点歌',
   });
   if (created.status !== 201 && created.status !== 200) {
-    throw new Error(apiErrText(created.status, created.json, '创建电台失败'));
+    throw new Error(apiErrText(created.status, created.json, '创建电台失败（' + channel + '）'));
   }
   const st = (created.json && (created.json.data || created.json));
   return st.id;
@@ -414,7 +420,7 @@ async function waitBotConnected(token, botId, tries = 30) {
 // ---------- 防重复连接（并发锁）+ 自动修复看门狗 ----------
 let linking = null;          // 串行化 link()，避免并发点击重复建 bot
 let desiredLinked = false;   // 用户意图：应保持连接（用于看门狗判断是否需自愈）
-let autoPausedByEmpty = false; // 因“频道无人”而自动暂停（用于有人进入时自动恢复）
+const autoPausedByEmpty = new Map(); // 频道 → 是否因“频道无人”被自动暂停（有人进入时自动恢复）
 let watchdogTimer = null;
 const repairing = new Set(); // 正在修复的频道（避免 15s tick 重叠修复）
 
@@ -498,24 +504,36 @@ async function getChannelClientCount() {
   }
 }
 
-// 所有已部署频道都无人时自动暂停；任一频道有人且此前是“因无人暂停”的，则自动恢复。
+// 频道无人自动暂停（按频道独立）：每个部署频道有自己的队列/播放器，
+// 哪个频道没人就只暂停哪个频道；有人进来只恢复那个频道。互不影响。
 async function maybeAutoPauseEmpty() {
   if (config.autoPauseEmpty === false) return;
-  const count = await getChannelClientCount();
-  if (count == null) return; // 无法判断则维持现状
-  const playing = !!player.get().playing;
-  if (count === 0) {
-    if (playing && !autoPausedByEmpty) {
-      player.pause();
-      autoPausedByEmpty = true;
-      console.log('[tsbridge] 所有部署频道均无人，自动暂停播放');
-    }
-  } else {
-    if (autoPausedByEmpty && !playing) {
-      player.resume();
-      resumeRadio().catch(() => {}); // 重新向 ts6-manager 下达 play-radio 保活
-      autoPausedByEmpty = false;
-      console.log('[tsbridge] 检测到有人进入频道，自动恢复播放');
+  const channels = configChannels();
+  if (!channels.length) return;
+  let per = null;
+  try {
+    const token = await getToken();
+    const serverConfigId = await ensureServer(token, cfg());
+    const clients = await listAllClients(token, serverConfigId);
+    if (clients && clients.length) per = countRealVoiceUsersByChannel(clients, channels);
+  } catch (e) { /* 无法判断则本轮不动 */ }
+  if (!per) return;
+  for (const ch of channels) {
+    const count = per[ch];
+    if (count == null) continue; // 该频道机器人不在/定位不到，跳过
+    const p = playerMod.forChannel(ch);
+    const playing = !!p.get().playing;
+    if (count === 0) {
+      if (playing && !autoPausedByEmpty.get(ch)) {
+        p.pause();
+        autoPausedByEmpty.set(ch, true);
+        console.log('[tsbridge] 频道「' + ch + '」无人，自动暂停该频道播放');
+      }
+    } else if (autoPausedByEmpty.get(ch) && !playing) {
+      p.resume();
+      resumeRadio(ch).catch(() => {}); // 重新向该频道机器人下达 play-radio 保活
+      autoPausedByEmpty.set(ch, false);
+      console.log('[tsbridge] 频道「' + ch + '」有人进入，自动恢复播放');
     }
   }
 }
@@ -548,7 +566,7 @@ async function repairChannel(channel) {
   const token = await getToken();
   const c = cfg();
   const serverConfigId = await ensureServer(token, c);
-  const stationId = await ensureStation(token, serverConfigId);
+  const stationId = await ensureStation(token, serverConfigId, channel);
   await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
   const ok = await waitBotConnected(token, botId, 20);
   if (!ok) throw new Error('机器人重连超时');
@@ -580,12 +598,12 @@ async function linkImpl() {
   const token = await getToken();
   console.log('[tsbridge] link: 步骤3/5 确保 TS 连接(serverConfig)…');
   const serverConfigId = await ensureServer(token, c);
-  console.log('[tsbridge] link: 步骤4/5 确保电台(station)…');
-  const stationId = await ensureStation(token, serverConfigId);
-  console.log('[tsbridge] link: 步骤5/5 按频道部署机器人（共 ' + channels.length + ' 个）…');
+  console.log('[tsbridge] link: 步骤4/5 按频道确保电台与机器人（共 ' + channels.length + ' 个频道）…');
+  // 电台按频道创建：link 时逐频道确保（每个频道一路独立电台流）
   const results = [];
   for (const channel of channels) {
     try {
+      const stationId = await ensureStation(token, serverConfigId, channel);
       const botId = await ensureBotForChannel(token, serverConfigId, channel);
       await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
       const ok = await waitBotConnected(token, botId);
@@ -602,7 +620,7 @@ async function linkImpl() {
   if (failed.length === results.length) {
     throw new Error('全部频道部署失败：' + failed.map((f) => f.channel + '（' + f.error + '）').join('；'));
   }
-  return { ok: true, results, stationId, serverConfigId };
+  return { ok: true, results, serverConfigId };
 }
 
 async function link() {
@@ -713,21 +731,36 @@ async function status() {
   }
 }
 
-// 恢复播放时向所有我们部署的机器人重新下达 play-radio（自愈）：
-// 暂停后机器人可能放弃电台流连接，仅改本地状态不会让它重新出声。
-async function resumeRadio() {
+// 恢复播放时向对应频道的机器人重新下达 play-radio（自愈）：暂停后机器人可能放弃
+// 电台流连接，仅改本地状态不会让它重新出声。channel 缺省时对所有部署频道执行。
+async function resumeRadio(channel) {
   let token;
   try { token = await getToken(); } catch (e) { return { ok: false }; }
   const bots = await getBots(token);
-  const targets = ourBots(bots);
+  let targets = ourBots(bots);
   if (!targets.length) return { ok: false, count: 0 };
   const c = cfg();
-  const scId = targets[0].serverConfigId || (await ensureServer(token, c));
-  const stationId = await ensureStation(token, scId);
+  const serverConfigId = targets[0].serverConfigId || (await ensureServer(token, c));
+  // 指定频道：只对该频道的机器人 + 该频道的独立电台流
+  if (channel) {
+    const bound = botBindings()[channel];
+    const name = botNameFor(channel);
+    targets = targets.filter((b) => String(b.id) === String(bound) || b.name === name || b.nickname === name);
+    if (!targets.length) return { ok: false, count: 0 };
+    const stationId = await ensureStation(token, serverConfigId, channel);
+    const r = await authFetch('POST', '/api/music-bots/' + targets[0].id + '/play-radio', token, { stationId });
+    return { ok: r.status === 200, count: r.status === 200 ? 1 : 0 };
+  }
+  // 缺省：逐频道恢复（每频道一路电台流）
   let n = 0;
-  for (const b of targets) {
+  for (const ch of configChannels()) {
+    const bound = botBindings()[ch];
+    const name = botNameFor(ch);
+    const bot = targets.find((b) => String(b.id) === String(bound) || b.name === name || b.nickname === name);
+    if (!bot) continue;
     try {
-      const r = await authFetch('POST', '/api/music-bots/' + b.id + '/play-radio', token, { stationId });
+      const stationId = await ensureStation(token, serverConfigId, ch);
+      const r = await authFetch('POST', '/api/music-bots/' + bot.id + '/play-radio', token, { stationId });
       if (r.status === 200) n++;
     } catch (e) { /* 继续 */ }
   }
