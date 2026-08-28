@@ -417,6 +417,7 @@ TSPages.music = async function () {
 
     let all = [];
     let page = 1;
+    let plRendered = [];
     const pageSize = 20;
     try {
       const d = await API.musicPlaylistTracksAll(plId);
@@ -434,15 +435,16 @@ TSPages.music = async function () {
       const pages = Math.max(1, Math.ceil(list.length / pageSize));
       if (page > pages) page = pages;
       const start = (page - 1) * pageSize;
+      plRendered = list.slice(start, start + pageSize);
       body.querySelector('#pl-count').textContent = `共 ${all.length} 首` + (kw ? `，匹配 ${list.length} 首` : '');
       const box = body.querySelector('#pl-list');
       if (!list.length) { box.innerHTML = '<div class="empty">无匹配曲目</div>'; return; }
       box.innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>歌曲</th><th>专辑</th><th class="num">时长</th><th class="actions">操作</th></tr></thead>
-        <tbody>${list.slice(start, start + pageSize).map(t => `<tr>
+        <tbody>${plRendered.map((t, i) => `<tr>
            <td class="song-cell">${thumb(t.cover)}<span>${esc(t.name)}${feeBadge(t.fee)} <span class="muted">- ${esc(t.artists)}</span></span></td>
              <td>${esc(t.album)}</td><td class="num">${fmtDur(t.duration)}</td>
-           <td class="actions"><button class="btn btn-sm btn-primary" data-add='${JSON.stringify({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee }).replace(/"/g, '&quot;')}'>点歌</button></td>
+           <td class="actions"><button class="btn btn-sm btn-primary" data-ri="${i}">点歌</button></td>
         </tr>`).join('')}</tbody></table></div>${pager(page, pages, (p) => { page = p; render(); })}
         <div class="modal-footer">
           <button class="btn btn-primary" id="pl-add-all">全部加入队列（${all.length}）</button>
@@ -452,6 +454,18 @@ TSPages.music = async function () {
         try {
           const r = await API.musicEnqueueMany(all.map((t) => ({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright })));
           TSUtils.toast(`已加入 ${r.count} 首`, 'success');
+          refreshQueue();
+        } catch (err) { TSUtils.toast(err.message, 'error'); }
+      };
+      box.onclick = async (e) => {
+        const btn = e.target.closest('button[data-ri]');
+        if (!btn) return;
+        const t = plRendered[Number(btn.dataset.ri)];
+        if (!t) return;
+        btn.disabled = true;
+        try {
+          await API.musicEnqueue({ id: t.id, name: t.name, artists: t.artists, album: t.album, duration: t.duration, cover: t.cover, fee: t.fee, noCopyright: t.noCopyright });
+          TSUtils.toast('已加入点歌队列', 'success');
           refreshQueue();
         } catch (err) { TSUtils.toast(err.message, 'error'); }
       };
