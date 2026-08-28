@@ -292,18 +292,35 @@ async function ensureBot(token, serverConfigId) {
 }
 
 // 等待 bot 真正连上 TS（start 是异步的，play-radio 要求已 connected）
+// 从 ts6-manager 的 bot 响应里取出状态字符串（兼容 data.bot.status / data.status / 嵌套等结构）
+function extractBotStatus(json) {
+  if (!json) return null;
+  const all = [];
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.status === 'string' && o.status) all.push(o.status);
+    for (const k of Object.keys(o)) { if (o[k] && typeof o[k] === 'object') walk(o[k]); }
+  };
+  walk(json);
+  for (const s of all) if (s === 'connected' || s === 'playing' || s === 'paused') return s;
+  return all[all.length - 1] || null;
+}
+
 async function waitBotConnected(token, botId, tries = 30) {
   for (let i = 0; i < tries; i++) {
     try {
       const { status, json } = await authFetch('GET', '/api/music-bots/' + botId, token);
       if (status === 200) {
-        const b = (json.data && (json.data.bot || json.data)) || json;
-        const s = b.status;
+        const s = extractBotStatus(json);
+        if (i % 3 === 0 || s) console.log('[tsbridge] waitBotConnected: 当前 status=' + s + ' (尝试 ' + (i + 1) + '/' + tries + ')');
         if (s === 'connected' || s === 'playing' || s === 'paused') return true;
+      } else {
+        console.log('[tsbridge] waitBotConnected: GET 状态码 ' + status);
       }
     } catch (e) { /* 忽略，继续等 */ }
     await new Promise((r) => setTimeout(r, 1000));
   }
+  console.log('[tsbridge] waitBotConnected: 超时，机器人未能连上频道');
   return false;
 }
 
@@ -390,6 +407,9 @@ async function linkImpl() {
   console.log('[tsbridge] link: 步骤1/6 确保电台流公网地址…');
   await ensureStreamPublicUrl();
   const c = cfg();
+  if (!c.channel) {
+    throw new Error('未配置机器人要加入的频道：请先在面板选择一个频道并保存，再点「重新连接/重建」');
+  }
   console.log('[tsbridge] link: 步骤2/6 获取 ts6-manager token（' + c.url + '）');
   const token = await getToken();
   console.log('[tsbridge] link: 步骤3/6 确保 TS 连接(serverConfig)…');
@@ -590,9 +610,10 @@ async function status() {
         if (status !== 200) return { enabled: true, connected: false };
         bot = (json.data && json.data.bot) || json.data || json;
       }
+      const botStatus = extractBotStatus(bot) || bot.status;
       const clid = b_clid(bot);
       if (clid != null) botTsClid = clid;
-      return { enabled: true, connected: bot.status === 'connected' || bot.status === 'playing' || bot.status === 'paused', status: bot.status, nowPlaying: bot.nowPlaying || null, clid: clid };
+      return { enabled: true, connected: botStatus === 'connected' || botStatus === 'playing' || botStatus === 'paused', status: botStatus, nowPlaying: bot.nowPlaying || null, clid: clid };
     };
     return await withAuth(run(token));
   } catch (e) {

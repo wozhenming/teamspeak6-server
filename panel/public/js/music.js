@@ -619,7 +619,10 @@ TSPages.music = async function () {
     catch (e) { TSUtils.toast('刷新失败：' + e.message, 'error'); }
   };
   $('btn-bot-relink').onclick = async () => {
+    const ch = ($('ts-channel') ? $('ts-channel').value : '').trim();
+    if (!ch) { TSUtils.toast('请先在上方选择一个频道，再重建', 'error'); return; }
     try {
+      await API.musicTsSaveConfig({ ts6mgrChannel: ch });
       TSUtils.toast('已发起重建，请稍后点「刷新状态」查看结果', 'success');
       await API.musicTsLink();
       setTimeout(refreshTsStatus, 8000);
