@@ -526,6 +526,21 @@ function findMe(items) {
   return items.find((x) => String(x.client_type) === '1'); // 退化：取任一 ServerQuery 客户端
 }
 
+// 取查询客户端自身的位置。ServerQuery 客户端常不在 clientlist 中露出自己，
+// 故优先用 whoami（返回 clid/cid）拿到自身的 clid，clientmove 缺它无法移动。
+async function myInfo() {
+  try {
+    const w = await cmd('whoami');
+    if (w && (w.clid != null || w.cid != null)) {
+      return { clid: w.clid != null ? w.clid : null, cid: w.cid != null ? w.cid : null, via: 'whoami' };
+    }
+  } catch (e) { /* 退回 clientlist 定位 */ }
+  const list = await cmd('clientlist -uid');
+  const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+  const m = findMe(items);
+  return { clid: m ? clidOf(m) : null, cid: m ? cidOf(m) : null, via: 'list' };
+}
+
 // 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
 // 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
 // 否则查询端停留在旧频道，收不到新频道的 !点歌 等指令。
@@ -538,9 +553,9 @@ async function joinBotChannel() {
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
-    const me = findMe(items);
-    const myClid = me ? clidOf(me) : null;
-    const myCid = me ? cidOf(me) : null;
+    const me = await myInfo();
+    const myClid = me.clid;
+    const myCid = me.cid;
     const { cid: botCid, botSeen, botName } = resolveTargetCid(items, chItems, myCid);
     console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
       + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
@@ -579,9 +594,10 @@ function resolveTargetCid(items, chItems, myCid) {
   const bot = findBot(items);
   const botSeen = !!bot;
   if (wantName) {
-    const leaf = wantName.split('/').pop();
-    const ch = chItems.find((x) => (x.channel_name || '') === wantName)
-      || chItems.find((x) => (x.channel_name || '').endsWith(leaf));
+    const leaf = wantName.split('/').pop().toLowerCase();
+    const lower = wantName.toLowerCase();
+    const ch = chItems.find((x) => (x.channel_name || '').toLowerCase() === lower)
+      || chItems.find((x) => (x.channel_name || '').toLowerCase().endsWith(leaf));
     if (ch) return { cid: cidOf(ch), botSeen, name: wantName };
   }
   if (bot) return { cid: cidOf(bot), botSeen: true, name: (bot.channel_name || bot.client_nickname || BOT_NAME) };
@@ -598,9 +614,9 @@ async function ensureInBotChannel() {
     try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const me = findMe(items);
-    const myClid = me ? clidOf(me) : null;
-    const myCid = me ? cidOf(me) : null;
+    const me = await myInfo();
+    const myClid = me.clid;
+    const myCid = me.cid;
     const bot = findBot(items);
     if (bot && myClid && String(cidOf(bot)) !== String(myCid)) {
       await cmd('clientmove cid=' + cidOf(bot) + ' clid=' + myClid);
