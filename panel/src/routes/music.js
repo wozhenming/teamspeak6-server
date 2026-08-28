@@ -34,9 +34,13 @@ router.use('/', (req, res) => {
       headers,
     },
     (up) => {
-      res.writeHead(up.statusCode || 200, {
-        'content-type': up.headers['content-type'] || 'application/json',
-      });
+      // 透传缓存相关响应头：图片接口上游带 Cache-Control/ETag，若只回传 content-type，
+      // 浏览器拿不到缓存指令，每次切回点歌页都会把所有封面重新拉一遍
+      const headers = { 'content-type': up.headers['content-type'] || 'application/json' };
+      for (const h of ['cache-control', 'etag', 'last-modified', 'expires', 'content-length']) {
+        if (up.headers[h] != null) headers[h] = up.headers[h];
+      }
+      res.writeHead(up.statusCode || 200, headers);
       up.pipe(res);
     }
   );
