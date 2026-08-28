@@ -697,6 +697,10 @@ async function getBotCurrentChannelServerSide() {
     const scId = target.serverConfigId || (await ensureServer(t, c));
     const sid = await getVirtualServerId(t, scId);
     const nick = (target.nickname || target.name || botNickname());
+    // 稳定身份：ts6-manager 记录的音乐机器人 TS client id（clid）。昵称可被普通用户改名冒充，
+    // 但机器人的 TS 客户端 id 不会变，用它精确定位才不会被同名用户劫持跟随到错误频道。
+    let targetClid = b_clid(target);
+    if (targetClid == null) targetClid = await getBotClid(); // 兜底：用此前缓存（status/refresh 常见）
     // 方法A：直接取客户端列表
     let clients = [];
     try {
@@ -705,12 +709,17 @@ async function getBotCurrentChannelServerSide() {
     } catch (e) { /* 忽略 */ }
     console.log('[tsbridge][botChan] clients端点返回 ' + clients.length + ' 个客户端: '
       + JSON.stringify(clients.map((cl) => ({ n: cl.nickname || cl.client_nickname, cid: cl.cid || cl.channel_id || cl.channelId }))));
-    // 用 ts6-manager 里该 bot 的实际昵称（target.nickname/name）优先精确匹配；
-    // 兼容前端对机器人改名后 client_nickname 与早前记录不一致的情况。
-    // 默认昵称“点歌机器人”沿用 includes 兜底（带前后缀可识别）；自定义昵称也做 includes 兼容。
-    const fallbackSubstr = (s) => ((s.nickname || s.client_nickname) || '').includes(nick);
-    const findBot = (list) => list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick)
-      || list.find(fallbackSubstr);
+    // 用 ts6-manager 里该 bot 的实际昵称（target.nickname/name）与稳定 clid 一起定位；
+    // 优先 clid（昵称可被冒充，cid 不能），昵称精确再 includes 兜底。
+    const clidOfCl = (cl) => cl.clid != null ? cl.clid : (cl.client_id != null ? cl.client_id : (cl.clientId != null ? cl.clientId : null));
+    const findBot = (list) => {
+      if (targetClid != null) {
+        const byClid = list.find((cl) => String(clidOfCl(cl)) === String(targetClid));
+        if (byClid) return byClid;
+      }
+      return list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick)
+        || list.find((cl) => ((cl.nickname || cl.client_nickname) || '').includes(nick));
+    };
     let bot = findBot(clients);
     let cid = null;
     if (bot) {
