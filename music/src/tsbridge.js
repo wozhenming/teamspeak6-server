@@ -212,7 +212,9 @@ async function getChannels(token, configId) {
       path = cur.name + '/' + path;
       depth++;
     }
-    return { id: c.id, name: c.name, path, clientsRaw: (Array.isArray(c.clientsRaw) ? c.clientsRaw : null) };
+    // 保留客户端计数：getChannelClientCount / 频道无人自动暂停依赖 ch.clients。
+    // 此前丢失该字段导致 maybeAutoPauseEmpty 读到的永远是 undefined（=null），自动暂停/恢复失效。
+    return { id: c.id, name: c.name, path, clients: c.clients, clientsRaw: (Array.isArray(c.clientsRaw) ? c.clientsRaw : null) };
   });
 }
 
@@ -668,6 +670,8 @@ async function resumeRadio() {
 }
 
 module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
+// 内部测试钩子（非公开接口）：供单元测试直接驱动「频道无人自动暂停/有人自动恢复」逻辑
+module.exports._internal = { maybeAutoPauseEmpty, getChannelClientCount };
 
 // 从 TS 服务器真实客户端列表取音乐机器人“当前所在”频道（权威、全可见）。
 // ts6-manager 用 WebQuery 能拿到完整 clientlist；从中按昵称找到音乐机器人，读出它所在的 cid。
