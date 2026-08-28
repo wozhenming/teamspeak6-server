@@ -564,6 +564,8 @@ async function joinBotChannelBody() {
   try {
     // 先刷新机器人 clid 缓存（优先用 clid 精准定位），失败不阻断
     try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
+    // 确保位于含目标频道的虚拟服务器（音乐机器人可能在非 1 号虚拟服务器）
+    await selectVirtualServer((config.ts6mgrChannel || '').trim());
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const channelList = await cmd('channellist');
@@ -634,6 +636,38 @@ async function joinBotChannelBody() {
 }
 // 串行化包装
 function joinBotChannel() { return enqueueMove(() => joinBotChannelBody()); }
+
+// 选择包含目标频道的虚拟服务器。TeamSpeak 可能有多台虚拟服务器，
+// 音乐机器人（点歌机器人）与点歌助手必须落在同一台虚拟服务器才能同频道。
+// 默认 use 1；若当前虚拟服务器里找不到目标频道，则遍历虚拟服务器找到含该频道的那台并 use 过去。
+async function selectVirtualServer(wantName) {
+  const defaultSid = (process.env.TS_CHAT_SID || config.ts6mgrSid || '1');
+  const leaf = (wantName || '').split('/').pop().toLowerCase();
+  const matchCh = (ch) => {
+    const n = (ch.channel_name || '').toLowerCase();
+    return n === (wantName || '').toLowerCase() || (leaf && n.endsWith(leaf));
+  };
+  if (wantName) {
+    try {
+      const sl = await cmd('serverlist');
+      const servers = (Array.isArray(sl) ? sl : [sl]).filter(Boolean);
+      for (const s of servers) {
+        const sid = s.virtualserver_id || s.sid || s.id;
+        if (!sid) continue;
+        try {
+          await cmd('use ' + sid);
+          const cl = await cmd('channellist');
+          const chs = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
+          if (chs.some(matchCh)) { console.log('[tschat] 已切到含目标频道的虚拟服务器 sid=' + sid); return; }
+        } catch (e) { /* 试下一台 */ }
+      }
+      console.log('[tschat] 未找到含目标频道的虚拟服务器，回退默认 sid=' + defaultSid);
+    } catch (e) {
+      console.log('[tschat] 遍历虚拟服务器失败，回退默认：' + (e.message || e));
+    }
+  }
+  await cmd('use ' + defaultSid);
+}
 
 // 解析目标频道 cid：1) 已配置频道名/路径；2) 机器人昵称；3) 兜底第一个语音用户频道
 function resolveTargetCid(items, chItems, myCid) {
@@ -706,7 +740,7 @@ async function ensureInBotChannelBody() {
 function ensureInBotChannel() { return enqueueMove(() => ensureInBotChannelBody()); }
 async function bootstrap() {
   try {
-    await cmd('use ' + (process.env.TS_CHAT_SID || '1'));
+    await selectVirtualServer((config.ts6mgrChannel || '').trim());
     // 昵称冲突自愈（上一次连接未干净退出时 513）
     const baseNick = process.env.TS_CHAT_NICKNAME || '点歌助手';
     let nick = baseNick;
