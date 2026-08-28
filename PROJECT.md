@@ -102,6 +102,9 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 | 登录后仍“未登录” | 803 成功但丢弃了 cookie；只收白名单丢了 refresh/token cookie | 顶层 `res.cookie` + `absorbLogin` 全量保留 |
 | 卸 UI 卡顿返页 | ts6-manager auth 限流 + 每次 PUT 刷新连接池 | token 缓存 10 分钟 + 指纹变化才 PUT |
 | 聊天指令无反应 | `handleRequest` 改同步后残留 `.catch` 抛 TypeError 断连 | 去掉多余 `.catch` |
+| 频道无人自动暂停失效 | 点歌助手(serveradmin Query) `clientmove` 进频道常驻，channellist `total_clients` 永远 ≥2 | 按 clients 端点 `client_type` 只统计真实语音用户（排除机器人自身与 Query 客户端） |
+| 队列筛选无效 | 前端 input 事件只翻页没把输入值写入 `queueQ`，请求永远带空 q | 事件回调读取 `e.target.value` 再防抖请求 |
+| 每次进点歌页图片全量重拉 | 面板 `/api/music` 代理只回传 content-type，丢掉了上游 `Cache-Control`/`ETag` | 代理透传缓存相关响应头 |
 
 ---
 
