@@ -682,8 +682,13 @@ async function getBotChannel() {
     const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
     if (status !== 200) return null;
     const b = (json.data && (json.data.bot || json.data)) || json;
-    // 频道候选字段
-    const chName = b.channel || b.currentChannel || b.channelName || b.defaultChannel || null;
+    // 诊断：把 bot 对象里所有频道相关字段打出来，确认哪个才是“当前所在频道”
+    console.log('[tsbridge][getBotChannel] 频道字段: keys=' + Object.keys(b).join(',')
+      + ' | channel=' + b.channel + ' | currentChannel=' + b.currentChannel
+      + ' | channelName=' + b.channelName + ' | defaultChannel=' + b.defaultChannel
+      + ' | channelId=' + b.channelId + ' | cid=' + b.cid);
+    // 频道候选字段：优先“当前频道”，其次默认频道
+    const chName = b.currentChannel || b.channel || b.channelName || b.defaultChannel || null;
     // 用频道列表把“频道名”映射到 ts6-manager 的 cid（更可靠）
     let cid = null;
     try {
