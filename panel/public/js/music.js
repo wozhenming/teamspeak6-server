@@ -39,6 +39,9 @@ TSPages.music = async function () {
       .fee-vip{background:#fff1d6;color:#c47b00}
       .fee-alb{background:#e6f0ff;color:#2b6cb0}
       .fee-none{background:#ececec;color:#8a8a8a;text-decoration:line-through}
+      .fee-playing{background:#e6f7ec;color:#18a058;margin:0 6px 0 0}
+      tr.queue-now td{background:rgba(61,126,255,.10)}
+      html[data-theme="light"] tr.queue-now td{background:rgba(37,99,235,.08)}
     </style>
     <div id="music-alert"></div>
 
@@ -67,66 +70,22 @@ TSPages.music = async function () {
     </div>
 
     <div class="card">
-      <h3><span>TeamSpeak 推流</span>
-        <span>
-          <button class="btn btn-sm btn-primary" id="btn-ts-link">生成机器人</button>
-          <button class="btn btn-sm" id="btn-ts-unlink">断开</button>
-        </span>
-      </h3>
+      <h3><span>TeamSpeak 推流</span></h3>
       <div id="ts-status" class="muted" style="font-size:12.5px">未连接</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
         <div style="display:flex;flex-direction:column;gap:3px">
-          <span class="muted" style="font-size:12px">点歌机器人昵称（改名后填实际昵称，点歌助手据此跟随）</span>
-          <input class="input" id="ts-bot-nickname" type="text" placeholder="点歌机器人" style="flex:1">
+          <span class="muted" style="font-size:12px">TeamSpeak WebQuery API Key（连接 TS 服务器的凭据）</span>
+          <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
         <div style="display:flex;flex-direction:column;gap:3px">
-          <span class="muted" style="font-size:12px">让点歌机器人加入的频道</span>
+          <span class="muted" style="font-size:12px">让点歌机器人加入的频道（音频推到这个频道）</span>
           <div style="display:flex;gap:8px">
             <select id="ts-channel" class="select" style="flex:1">
               <option value="">（加载频道中…）</option>
             </select>
             <button class="btn btn-sm btn-primary" id="btn-ts-switch" title="把机器人切换到所选频道">切换频道</button>
-            <button class="btn btn-sm" id="btn-ts-refresh" title="刷新频道列表">↻</button>
+            <button class="btn btn-sm" id="btn-ts-refresh" title="保存 Key 并刷新频道列表">↻</button>
           </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:3px">
-          <span class="muted" style="font-size:12px">TeamSpeak WebQuery API Key</span>
-          <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
-          <label class="ts-toggle" style="font-size:12.5px">
-            <input type="checkbox" id="ts-token-on">
-            <span>开启音频流令牌（防公网随意收听）</span>
-          </label>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-sm" id="btn-ts-token-save">生成并保存</button>
-            <code id="ts-token-val" style="font-size:11px;word-break:break-all;flex:1;min-width:120px"></code>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
-          <label class="ts-toggle" style="font-size:12.5px">
-            <input type="checkbox" id="ts-chat-on">
-            <span>在频道内启用聊天点歌</span>
-          </label>
-          <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px" id="ts-cmd-box">
-            <label class="ts-toggle"><input type="checkbox" data-cmd="dian"> 点歌</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="play"> 播放</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="playat"> 播放第N首</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="pause"> 暂停</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="clear"> 清队列</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="search"> 搜索</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="queue"> 队列</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="switch"> 切频道</label>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-            <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
-            <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
-            <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
-          </div>
-           <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放(第N首)</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <div class="muted" style="font-size:12px;font-weight:600">音质与行为</div>
@@ -167,19 +126,61 @@ TSPages.music = async function () {
             <span class="muted" id="ts-audio-state" style="font-size:11.5px">修改后下一首生效</span>
           </div>
         </div>
+        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+          <label class="ts-toggle" style="font-size:12.5px">
+            <input type="checkbox" id="ts-token-on">
+            <span>开启音频流令牌（防公网随意收听）</span>
+          </label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-sm" id="btn-ts-token-save">生成并保存</button>
+            <code id="ts-token-val" style="font-size:11px;word-break:break-all;flex:1;min-width:120px"></code>
+          </div>
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
-        <div class="muted" style="font-size:12px;font-weight:600">机器人管理</div>
-        <div id="bot-mgmt-status" class="muted" style="font-size:12px">状态：未知</div>
+    </div>
+
+    <div class="card">
+      <h3><span>机器人管理</span></h3>
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px">点歌机器人：加入频道推流的音乐机器人；点歌助手：驻留频道接收 <code>!点歌</code> 等聊天指令的查询端。此处管理二者的身份与生命周期，推流参数在「TeamSpeak 推流」卡片配置。</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <span class="muted" style="font-size:12px">点歌机器人昵称（改名后填实际昵称，点歌助手据此跟随）</span>
+          <input class="input" id="ts-bot-nickname" type="text" placeholder="点歌机器人" style="flex:1">
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button class="btn btn-sm btn-primary" id="btn-ts-link">生成机器人 / 重建连接</button>
+          <button class="btn btn-sm" id="btn-ts-unlink">断开</button>
           <button class="btn btn-sm" id="btn-bot-refresh">刷新状态</button>
-          <button class="btn btn-sm btn-primary" id="btn-bot-relink">重新连接 / 重建</button>
           <button class="btn btn-sm btn-danger" id="btn-bot-delete">删除机器人</button>
         </div>
-        <div class="muted" style="font-size:11px">「重新连接 / 重建」按当前配置重建点歌机器人；「删除机器人」彻底移除 ts6-manager 中的机器人（不会删除本地歌单/队列数据）。</div>
+        <div class="muted" style="font-size:11px">填好上方 Key、选好频道后点「生成机器人 / 重建连接」，机器人会自动加入频道推流；「删除机器人」彻底移除 ts6-manager 中的机器人（不会删除本地歌单/队列数据）。</div>
+        <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
+          <div class="muted" style="font-size:12px;font-weight:600">点歌助手（频道聊天点歌）</div>
+          <label class="ts-toggle" style="font-size:12.5px">
+            <input type="checkbox" id="ts-chat-on">
+            <span>在频道内启用聊天点歌</span>
+          </label>
+          <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px" id="ts-cmd-box">
+            <label class="ts-toggle"><input type="checkbox" data-cmd="dian"> 点歌</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="play"> 播放</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="playat"> 播放第N首</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="pause"> 暂停</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="clear"> 清队列</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="search"> 搜索</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="queue"> 队列</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="switch"> 切频道</label>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
+            <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
+            <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
+          </div>
+          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放(第N首)</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
+        </div>
       </div>
-      <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
     </div>
 
     <div class="card">
@@ -538,24 +539,29 @@ TSPages.music = async function () {
     try {
       const d = await API.musicQueue(queuePage, queuePageSize, queueQ);
       const items = d.items || [];
-      $('queue-summary').textContent = `（共 ${d.total} 首）`;
+      $('queue-summary').textContent = queueQ ? `（筛选匹配 ${d.total} 首）` : `（共 ${d.total} 首）`;
       const box = $('queue-list');
       if (!items.length) {
         if (d.page > 1) { queuePage = d.page - 1; return refreshQueue(); }
-        box.innerHTML = '<div class="empty">队列为空</div>';
+        box.innerHTML = `<div class="empty">${queueQ ? '没有匹配的歌曲' : '队列为空'}</div>`;
         return;
       }
+      const curId = playerState.current ? playerState.current.id : null;
       box.innerHTML = `<div class="table-wrap"><table>
         <thead><tr><th>#</th><th>歌曲</th><th>点歌人</th><th class="actions">操作</th></tr></thead>
-        <tbody>${items.map((it, i) => `<tr>
-          <td>${i + 1}</td>
-           <td class="song-cell">${thumb(it.cover)}<span>${esc(it.title)}${feeBadge(it.fee)} <span class="muted">- ${esc(it.artists)}</span></span></td>
+        <tbody>${items.map((it, i) => {
+          const isCur = curId != null && Number(it.id) === Number(curId);
+          const idx = (d.page - 1) * d.pageSize + i + 1;
+          return `<tr${isCur ? ' class="queue-now"' : ''}>
+          <td>${idx}</td>
+           <td class="song-cell">${isCur ? '<span class="fee-badge fee-playing">▶ 播放中</span>' : ''}${thumb(it.cover)}<span>${esc(it.title)}${feeBadge(it.fee)} <span class="muted">- ${esc(it.artists)}</span></span></td>
           <td>${esc(it.requestedBy)}</td>
           <td class="actions">
             <button class="btn btn-sm" data-play="${it.id}">播放</button>
             <button class="btn btn-sm btn-danger" data-del="${it.id}">移除</button>
           </td>
-        </tr>`).join('')}</tbody></table></div>${pager(d.page, d.pages, (p) => { queuePage = p; refreshQueue(); })}`;
+        </tr>`;
+        }).join('')}</tbody></table></div>${pager(d.page, d.pages, (p) => { queuePage = p; refreshQueue(); })}`;
     } catch (e) { /* 忽略 */ }
   }
 
@@ -572,22 +578,26 @@ TSPages.music = async function () {
     queuePage = 1;
     refreshQueue();
   };
-  $('queue-q').addEventListener('input', () => { queuePage = 1; refreshQueue(); });
+  // 筛选队列：必须把输入值写入 queueQ 再请求（此前漏了赋值，筛选永远无效）
+  let queueQTimer = null;
+  $('queue-q').addEventListener('input', (e) => {
+    queueQ = e.target.value.trim();
+    queuePage = 1;
+    if (queueQTimer) clearTimeout(queueQTimer);
+    queueQTimer = setTimeout(refreshQueue, 250); // 轻防抖，避免每个按键都打一次后端
+  });
 
   async function refreshTsStatus() {
+    if (token !== TSUtils.navToken()) return;
     try {
       const st = await API.musicTsStatus();
       const box = $('ts-status');
-      const botBox = $('bot-mgmt-status');
-      if (st.error) { box.textContent = '连接异常：' + st.error; if (botBox) botBox.textContent = '状态：连接异常（' + st.error + '）'; return; }
+      if (st.error) { box.textContent = '连接异常：' + st.error; return; }
       const np = st.nowPlaying ? `${st.nowPlaying.title || ''}${st.nowPlaying.artist ? ' - ' + st.nowPlaying.artist : ''}` : '';
-      box.textContent = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道') + (np ? '　正在播放：' + np : '');
-      if (botBox) {
-        let txt = st.connected ? ('已连接（' + st.status + '）') : '未连接';
-        if (st.clid != null) txt += '　TS clid: ' + st.clid;
-        if (np) txt += '　正在播放：' + np;
-        botBox.textContent = '状态：' + txt;
-      }
+      let txt = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道');
+      if (st.clid != null) txt += '　clid: ' + st.clid;
+      if (np) txt += '　正在播放：' + np;
+      box.textContent = txt;
     } catch (e) { /* 忽略 */ }
   }
   $('btn-ts-link').onclick = async () => {
@@ -596,7 +606,7 @@ TSPages.music = async function () {
       const key = $('ts-key').value.trim();
       if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
       if (!key) { TSUtils.toast('请先填写 TS API Key', 'error'); return; }
-      TSUtils.toast('正在生成机器人并连接 TeamSpeak…', 'success');
+      TSUtils.toast('正在生成/重建机器人并连接 TeamSpeak…', 'success');
       // 保存频道、昵称与 Key，再自动建连（后端异步执行，最长可能 25s+，避免代理超时）
       await API.musicTsSaveConfig({ ts6mgrChannel: ch, ts6mgrBotNickname: $('ts-bot-nickname').value.trim() || '点歌机器人', tsApiKey: key });
       await API.musicTsLink();
@@ -621,16 +631,6 @@ TSPages.music = async function () {
   $('btn-bot-refresh').onclick = async () => {
     try { await refreshTsStatus(); TSUtils.toast('已刷新机器人状态', 'success'); }
     catch (e) { TSUtils.toast('刷新失败：' + e.message, 'error'); }
-  };
-  $('btn-bot-relink').onclick = async () => {
-    const ch = ($('ts-channel') ? $('ts-channel').value : '').trim();
-    if (!ch) { TSUtils.toast('请先在上方选择一个频道，再重建', 'error'); return; }
-    try {
-      await API.musicTsSaveConfig({ ts6mgrChannel: ch });
-      TSUtils.toast('已发起重建，请稍后点「刷新状态」查看结果', 'success');
-      await API.musicTsLink();
-      setTimeout(refreshTsStatus, 8000);
-    } catch (e) { TSUtils.toast('重建失败：' + e.message, 'error'); }
   };
   $('btn-bot-delete').onclick = async () => {
     if (!confirm('确定要彻底删除点歌机器人吗？\n（ts6-manager 中的机器人会被移除，本地歌单/队列不受影响；之后可用「重新连接/重建」恢复）')) return;
@@ -791,7 +791,7 @@ TSPages.music = async function () {
     document.getElementById('modal-title').textContent = '聊天点歌指令一览';
     const body = document.getElementById('modal-body');
     body.innerHTML = `
-      <div class="muted" style="font-size:12px;margin-bottom:8px">指令以 <code>!</code> 开头；需在面板「推流卡片 → 聊天设置」中开启对应权限。直接发送歌曲ID或网易云链接也可点歌。</div>
+      <div class="muted" style="font-size:12px;margin-bottom:8px">指令以 <code>!</code> 开头；需在面板「机器人管理 → 点歌助手」中开启对应权限。直接发送歌曲ID或网易云链接也可点歌。</div>
       <div class="table-wrap chat-help-table">
         <table>
           <thead><tr><th>指令</th><th>别名</th><th>示例</th><th>说明</th></tr></thead>
@@ -880,8 +880,8 @@ TSPages.music = async function () {
   });
 
   await refreshLogin();
+  await pollPlayer(true); // 先取播放器状态，队列首次渲染即可标注“正在播放”
   await refreshQueue();
-  await pollPlayer(true);
   startTick();
   pollTimer = TSUtils.setInterval(() => { refreshQueue(); pollPlayer(); }, 5000);
 
