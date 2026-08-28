@@ -606,29 +606,30 @@ async function joinBotChannelBody() {
     let botName = '';
     let botSeen = false;
     let botChanName = null;
-    // 1) 取音乐机器人“目标频道名”：以 ts6-manager 的 defaultChannel 为准（面板切频道后即为当前频道）。
-    //    ts6-manager 的 bot 对象只有 defaultChannel，没有“当前频道”字段；但面板切频道会更新它并重启机器人，
-    //    故稳定态下 defaultChannel == 机器人实际所在频道。
+    // 取音乐机器人“当前所在频道”：优先 ts6-manager 从 TS 服务器真实客户端列表定位（权威、全可见）。
+    // 返回 { cid, name }；cid 为服务器侧权威编号（与 ServerQuery 同一台服务器，cid 一致）。
     try {
       const botChan = await tsbridge.getBotChannel();
-      if (botChan && botChan.name) {
+      if (botChan && botChan.cid != null) {
+        botCid = String(botChan.cid);
         botChanName = botChan.name;
-        botName = botChan.name + '(ts6-manager)';
+        botName = (botChan.name || ('cid' + botChan.cid)) + '(服务端定位)';
         botSeen = true;
-        console.log('[tschat] ts6-manager 报告音乐机器人频道名：' + botChan.name + (botChan.cid != null ? ' (ts6mgr建议cid=' + botChan.cid + ')' : ''));
+        console.log('[tschat] 服务端定位音乐机器人频道：name=' + botChan.name + ' cid=' + botChan.cid);
+      } else if (botChan && botChan.name) {
+        // 仅有频道名（兜底）：用查询端自身 channelidbyname 解析 cid
+        botChanName = botChan.name;
+        botName = botChan.name + '(ts6-manager名称)';
+        botSeen = true;
+        console.log('[tschat] ts6-manager 报告频道名（无cid）：' + botChan.name);
       }
     } catch (e) { /* 忽略 */ }
-    // 2) 解析目标 cid：必须由“查询端自己”用 channelidbyname 解析（查询端 cid 编号空间才是对的）。
-    //    绝不直接拿 ts6-manager 的 cid 喂 clientmove——两台接口编号空间不一致。
-    if (botChanName) {
+    // 若服务端定位只给了频道名，用查询端自身的 channelidbyname 解析 cid（编号空间以 ServerQuery 为准）
+    if (!botCid && botChanName) {
       const cid = await resolveCidByName(botChanName);
       if (cid) { botCid = cid; console.log('[tschat] channelidbyname(' + botChanName + ') → cid=' + cid); }
     }
-    // 3) 兜底：ts6-manager 的 cid（仅当上面失败才用，已知不可靠）
-    if (!botCid) {
-      try { const bc = await tsbridge.getBotChannel(); if (bc && bc.cid != null) { botCid = String(bc.cid); console.log('[tschat] 退回使用 ts6-manager cid=' + botCid); } } catch (e) {}
-    }
-    // 4) 兜底：按配置频道名解析
+    // 兜底：按配置频道名解析
     if (!botCid) {
       const want = (config.ts6mgrChannel || '').trim();
       if (want) {

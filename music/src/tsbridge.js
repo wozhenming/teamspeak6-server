@@ -198,7 +198,8 @@ async function getChannels(token, configId) {
     else if (ch.clients != null) clients = Number(ch.clients);
     else if (ch.client_count != null) clients = Number(ch.client_count);
     else if (ch.channel_clients != null) clients = Number(ch.channel_clients);
-    return { id, name, pid, clients };
+    const clientsRaw = Array.isArray(ch.clients) ? ch.clients : null;
+    return { id, name, pid, clients, clientsRaw };
   });
   const byId = {};
   norm.forEach((c) => { byId[c.id] = c; });
@@ -211,7 +212,7 @@ async function getChannels(token, configId) {
       path = cur.name + '/' + path;
       depth++;
     }
-    return { id: c.id, name: c.name, path };
+    return { id: c.id, name: c.name, path, clientsRaw: (Array.isArray(c.clientsRaw) ? c.clientsRaw : null) };
   });
 }
 
@@ -668,9 +669,10 @@ async function resumeRadio() {
 
 module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
 
-// 取音乐机器人当前所在频道（name + cid）。ts6-manager 有完整可见性，不受 ServerQuery 限制。
+// 从 TS 服务器真实客户端列表取音乐机器人“当前所在”频道（权威、全可见）。
+// ts6-manager 用 WebQuery 能拿到完整 clientlist；从中按昵称找到音乐机器人，读出它所在的 cid。
 // 返回 { cid, name } 或 null。
-async function getBotChannel() {
+async function getBotCurrentChannelServerSide() {
   try {
     const t = await getToken();
     const c = cfg();
@@ -678,18 +680,65 @@ async function getBotChannel() {
     const target = pickBot(c, bots);
     if (!target) return null;
     const scId = target.serverConfigId || (await ensureServer(t, c));
-    // 音乐机器人详情（可能含当前频道）
+    const sid = await getVirtualServerId(t, scId);
+    const nick = (target.nickname || target.name || '点歌机器人');
+    // 方法A：直接取客户端列表
+    let clients = [];
+    try {
+      const r = await authFetch('GET', '/api/servers/' + scId + '/vs/' + sid + '/clients', t);
+      if (r.status === 200) clients = toArray(r.json);
+    } catch (e) { /* 忽略 */ }
+    console.log('[tsbridge][botChan] clients端点返回 ' + clients.length + ' 个客户端: '
+      + JSON.stringify(clients.map((cl) => ({ n: cl.nickname || cl.client_nickname, cid: cl.cid || cl.channel_id || cl.channelId }))));
+    const findBot = (list) => list.find((cl) => (((cl.nickname || cl.client_nickname) || '').includes('点歌机器人')))
+      || list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick);
+    let bot = findBot(clients);
+    let cid = null;
+    if (bot) {
+      cid = bot.cid != null ? bot.cid : (bot.channel_id != null ? bot.channel_id : (bot.channelId != null ? bot.channelId : null));
+    }
+    // 方法B：遍历频道，找含该昵称客户端的频道（部分实现把客户端挂在频道对象里）
+    if (cid == null) {
+      try {
+        const chs = await getChannels(t, scId);
+        for (const ch of chs) {
+          const raw = ch.clientsRaw;
+          if (Array.isArray(raw) && raw.length) {
+            if (findBot(raw)) { cid = ch.id; break; }
+          }
+        }
+      } catch (e) { /* 忽略 */ }
+    }
+    if (cid == null) return null;
+    let name = null;
+    try { const chs = await getChannels(t, scId); const h = chs.find((ch) => String(ch.id) === String(cid)); if (h) name = h.name; } catch (e) {}
+    console.log('[tsbridge][botChan] 服务端定位音乐机器人当前频道：cid=' + cid + ' name=' + (name || '?'));
+    return { cid: String(cid), name };
+  } catch (e) {
+    console.log('[tsbridge][botChan] 失败: ' + (e && e.message ? e.message : e));
+    return null;
+  }
+}
+
+// 取音乐机器人当前所在频道（name + cid）。
+// 优先用 TS 服务器真实客户端列表（权威、全可见，不受 ServerQuery 不可靠视图影响）；
+// 兜底再用 defaultChannel（仅配置值，非实时）。返回 { cid, name } 或 null。
+async function getBotChannel() {
+  try {
+    const fromServer = await getBotCurrentChannelServerSide();
+    if (fromServer && fromServer.cid != null) return fromServer;
+  } catch (e) { /* 忽略，走兜底 */ }
+  try {
+    const t = await getToken();
+    const c = cfg();
+    const bots = await getBots(t);
+    const target = pickBot(c, bots);
+    if (!target) return null;
+    const scId = target.serverConfigId || (await ensureServer(t, c));
     const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
     if (status !== 200) return null;
     const b = (json.data && (json.data.bot || json.data)) || json;
-    // 诊断：把 bot 对象里所有频道相关字段打出来，确认哪个才是“当前所在频道”
-    console.log('[tsbridge][getBotChannel] 频道字段: keys=' + Object.keys(b).join(',')
-      + ' | channel=' + b.channel + ' | currentChannel=' + b.currentChannel
-      + ' | channelName=' + b.channelName + ' | defaultChannel=' + b.defaultChannel
-      + ' | channelId=' + b.channelId + ' | cid=' + b.cid);
-    // 频道候选字段：优先“当前频道”，其次默认频道
     const chName = b.currentChannel || b.channel || b.channelName || b.defaultChannel || null;
-    // 用频道列表把“频道名”映射到 ts6-manager 的 cid（更可靠）
     let cid = null;
     try {
       const channels = await getChannels(t, scId);
@@ -699,7 +748,6 @@ async function getBotChannel() {
         || channels.find((x) => ((x.path || x.name || '').trim().toLowerCase().endsWith(lower.split('/').pop())));
       if (hit) cid = hit.id;
     } catch (e) { /* 忽略 */ }
-    // 若详情里直接带了频道 id 也采用
     if (cid == null) cid = b.channelId != null ? b.channelId : (b.cid != null ? b.cid : null);
     if (!chName && cid == null) return null;
     return { cid: cid != null ? String(cid) : null, name: chName };
