@@ -454,6 +454,40 @@ function cmd(cmdStr, timeoutMs = 6000) {
   });
 }
 
+// TeamSpeak ServerQuery 参数转义：空格→\s，反斜杠→\\，竖线→\p（频道名含空格必须转义）
+function q(str) {
+  return String(str == null ? '' : str)
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\p')
+    .replace(/ /g, '\\s');
+}
+
+// 用查询端自己的 channelidbyname 把“频道名”解析成查询端视角的 cid（编号空间以 ServerQuery 为准）。
+// 若该命令受限失败，则逐个探测 channelinfo cid=1..N 按频道名匹配（已验证 channelinfo 对本查询端可用）。
+// 返回字符串 cid 或 null。
+async function resolveCidByName(name) {
+  if (!name) return null;
+  const want = String(name).trim().toLowerCase();
+  try {
+    const r = await cmd('channelidbyname channel_name=' + q(name));
+    const obj = (Array.isArray(r) ? r[0] : r) || {};
+    if (obj.cid != null) return String(obj.cid);
+    const m = JSON.stringify(r).match(/cid[=\s:'"]+(\d+)/i);
+    if (m) return m[1];
+  } catch (e) {
+    console.log('[tschat] channelidbyname(' + name + ') 失败，改探测 channelinfo：' + (e.message || e));
+  }
+  // 退化：探测 cid=1..12，匹配频道名
+  for (let cid = 1; cid <= 12; cid++) {
+    try {
+      const ci = await cmd('channelinfo cid=' + cid);
+      const o = (Array.isArray(ci) ? ci[0] : ci) || {};
+      if ((o.channel_name || '').trim().toLowerCase() === want) return String(cid);
+    } catch (e) { /* 该 cid 可能不存在，忽略 */ }
+  }
+  return null;
+}
+
 // ---------- SSH 连接管理 ----------
 function connect() {
   const host = config.tsHost || 'teamspeak';
@@ -571,22 +605,35 @@ async function joinBotChannelBody() {
     let botCid = null;
     let botName = '';
     let botSeen = false;
-    // 优先：用 ts6-manager（完整可见性）直接取音乐机器人当前所在频道的 cid 与名称。
-    // 查询端 ServerQuery 看不到其他客户端/频道，所以必须以 ts6-manager 为准。
-    let botChan = null;
-    try { botChan = await tsbridge.getBotChannel(); } catch (e) { /* 忽略 */ }
-    if (botChan && botChan.cid != null) {
-      botCid = botChan.cid; botName = (botChan.name || ('cid' + botChan.cid)) + '(ts6-manager)'; botSeen = true;
-      console.log('[tschat] ts6-manager 报告音乐机器人频道：name=' + botChan.name + ' cid=' + botChan.cid);
-    } else {
-      // 退回：按 client id / UID 跨虚拟服务器定位（受 ServerQuery 可见性限制，可能失败）
-      const located = await locateMusicBot();
-      if (located) {
-        botCid = located.cid; botName = located.nick + '(按clientid定位)'; botSeen = true;
-        console.log('[tschat] 已按 client id 定位点歌机器人：clid=' + located.clid + ' 频道cid=' + located.cid + ' 虚拟服务器sid=' + located.sid);
-      } else {
-        // 兜底：按配置频道名（跨虚拟服务器扫描）
-        await selectVirtualServer((config.ts6mgrChannel || '').trim());
+    let botChanName = null;
+    // 1) 取音乐机器人“目标频道名”：以 ts6-manager 的 defaultChannel 为准（面板切频道后即为当前频道）。
+    //    ts6-manager 的 bot 对象只有 defaultChannel，没有“当前频道”字段；但面板切频道会更新它并重启机器人，
+    //    故稳定态下 defaultChannel == 机器人实际所在频道。
+    try {
+      const botChan = await tsbridge.getBotChannel();
+      if (botChan && botChan.name) {
+        botChanName = botChan.name;
+        botName = botChan.name + '(ts6-manager)';
+        botSeen = true;
+        console.log('[tschat] ts6-manager 报告音乐机器人频道名：' + botChan.name + (botChan.cid != null ? ' (ts6mgr建议cid=' + botChan.cid + ')' : ''));
+      }
+    } catch (e) { /* 忽略 */ }
+    // 2) 解析目标 cid：必须由“查询端自己”用 channelidbyname 解析（查询端 cid 编号空间才是对的）。
+    //    绝不直接拿 ts6-manager 的 cid 喂 clientmove——两台接口编号空间不一致。
+    if (botChanName) {
+      const cid = await resolveCidByName(botChanName);
+      if (cid) { botCid = cid; console.log('[tschat] channelidbyname(' + botChanName + ') → cid=' + cid); }
+    }
+    // 3) 兜底：ts6-manager 的 cid（仅当上面失败才用，已知不可靠）
+    if (!botCid) {
+      try { const bc = await tsbridge.getBotChannel(); if (bc && bc.cid != null) { botCid = String(bc.cid); console.log('[tschat] 退回使用 ts6-manager cid=' + botCid); } } catch (e) {}
+    }
+    // 4) 兜底：按配置频道名解析
+    if (!botCid) {
+      const want = (config.ts6mgrChannel || '').trim();
+      if (want) {
+        const cid = await resolveCidByName(want);
+        if (cid) { botCid = cid; botName = want + '(配置频道)'; console.log('[tschat] 按配置频道名解析 ' + want + ' → cid=' + cid); }
       }
     }
     const list = await cmd('clientlist -uid');
@@ -597,21 +644,9 @@ async function joinBotChannelBody() {
     const myClid0 = me0.clid;
     const myCid0 = me0.cid;
     if (!botCid) {
-      // 关键：ServerQuery 的频道 id 与 ts6-manager 的频道 id 是两套不同的编号空间。
-      // 查询端 clientmove 必须用「ServerQuery 自己的 channellist」按频道名解析出的 cid。
+      // 终极兜底：用 ServerQuery 自身的 channellist 按名解析（可见性受限时可能失败）
       const r = resolveTargetCid(items, chItems, myCid0);
       botCid = r.cid; botName = r.name; botSeen = r.botSeen;
-      if (!botCid) {
-        // 退回：用 ts6-manager 解析（注意其 id 空间可能不同，仅作兜底）
-        try {
-          const channels = await tsbridge.listChannels();
-          const want = (config.ts6mgrChannel || '').trim().toLowerCase();
-          const leaf = want.split('/').pop();
-          const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
-            || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
-          if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
-        } catch (e) { /* 忽略 */ }
-      }
     }
     // 该 TS 服务器的 ServerQuery whoami 频道信息不可靠（会把 cid=2 报成 Default Channel、
     // 把真实所在频道误报为 1），因此不再用 whoami 的 myCid 判断是否“已在目标频道”，
