@@ -431,16 +431,41 @@ async function unlink() {
 }
 
 // 切换机器人所在频道：更新 defaultChannel 后重启机器人进入新频道（保留播放队列/电台流）
+// 注意：必须“完全断开”（stop）再重连，单停播放（stop-playback）不会让 bot 离开旧频道，
+// 那样 start 只是原地恢复，造成“提示切换成功但实际没动”的现象。
 async function switchChannel(channelPath) {
   const path = (channelPath || '').trim();
   if (!path) throw new Error('频道不能为空');
-  // 立即持久化新频道，使后续 link() 的 ensureBot 使用它作为 defaultChannel
+  // 立即持久化新频道，使后续 start/restart 使用它作为 defaultChannel
   try { config.saveTsBridge({ ts6mgrChannel: path }); } catch (e) { /* 忽略 */ }
-  // 若已连接，先停播再重建连接（re-link 会以新 defaultChannel 重启 bot 进新频道）
-  if (desiredLinked) {
-    try { await unlink(); } catch (e) { /* 忽略 */ }
+  const token = await getToken();
+  const c = cfg();
+  const bots = await getBots(token);
+  const bot = pickBot(c, bots) || bots[0];
+  if (!bot) {
+    // 还没有建过机器人：走完整 link（创建并以新频道加入）
+    return await link();
   }
-  return await link();
+  const botId = bot.id;
+  // 1) 更新目标频道
+  try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: path }); } catch (e) { /* 忽略 */ }
+  // 2) 重启机器人（离开旧频道并以新频道重新加入）
+  let r = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
+  if (r.status !== 200) {
+    // 退回：完全停止后重新 link（link 内部会再次 PUT 频道并 start）
+    await authFetch('POST', '/api/music-bots/' + botId + '/stop', token);
+    return await link();
+  }
+  await waitBotConnected(token, botId);
+  // 3) 恢复电台流（默认频道变了，bot 重启后需要重新下达 play-radio）
+  const serverConfigId = await ensureServer(token, c);
+  const stationId = await ensureStation(token, serverConfigId);
+  const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
+  if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+  try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: path }); } catch (e) { /* 忽略 */ }
+  desiredLinked = true;
+  startWatchdog();
+  return { ok: true, botId, stationId, serverConfigId };
 }
 
 // 带 token 失效重试：401 时强制重新登录再试一次
