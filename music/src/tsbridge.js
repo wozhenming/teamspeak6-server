@@ -738,7 +738,12 @@ async function resumeRadio() {
 
 module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
 // 内部测试钩子（非公开接口）：供单元测试直接驱动「频道无人自动暂停/有人自动恢复」逻辑
-module.exports._internal = { maybeAutoPauseEmpty, getChannelClientCount };
+module.exports._internal = {
+  maybeAutoPauseEmpty,
+  getChannelClientCount,
+  // 测试钩子：重启后看门狗是否应保持工作（desiredLinked 已随持久化 botId 恢复）
+  isLinkedDesired: () => desiredLinked,
+};
 
 // 从 TS 服务器真实客户端列表取音乐机器人“当前所在”频道（权威、全可见）。
 // ts6-manager 用 WebQuery 能拿到完整 clientlist；从中按昵称找到音乐机器人，读出它所在的 cid。
@@ -839,4 +844,10 @@ async function getBotChannel() {
 }
 
 // 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
-if (config.ts6mgrBotId) startWatchdog();
+// 必须同时把 desiredLinked 置回 true：它只在 link() 成功时被置位，容器重启后恒为 false，
+// 看门狗会在 tick 里直接 return——频道无人自动暂停与断线自动重连在每次重启/部署后全部失效
+// （机器人本身活在 ts6-manager 进程里不受影响，问题因此很难被察觉）。
+if (config.ts6mgrBotId) {
+  desiredLinked = true;
+  startWatchdog();
+}
