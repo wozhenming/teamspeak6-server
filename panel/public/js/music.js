@@ -114,13 +114,14 @@ TSPages.music = async function () {
             <label class="ts-toggle"><input type="checkbox" data-cmd="queue"> 队列</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="switch"> 切频道</label>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
-          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code></div>
+          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
         </div>
       </div>
       <div class="muted" style="font-size:11.5px;margin-top:8px">填好 Key、选好频道后点“生成机器人”，机器人会自动加入频道推流。</div>
@@ -674,6 +675,7 @@ TSPages.music = async function () {
     { cmd: '!队列', alias: '!列表 · !q · !playlist · !待播', ex: '!队列 2', desc: '查看播放队列（每页10首，可翻页）' },
     { cmd: '!循环', alias: '!循环模式 · !loop · !cycle', ex: '!循环 列表', desc: '设置循环：列表 / 单曲 / 随机 / 关' },
     { cmd: '!状态', alias: '!now · !当前 · !playing · !正在播放', ex: '!状态', desc: '查看当前播放与队列' },
+    { cmd: '!切频道', alias: '!切换频道 · !switchchannel · !switch', ex: '!切频道 点歌专区', desc: '把点歌机器人切换到指定频道' },
   ];
   function showChatCmdHelp() {
     const overlay = document.getElementById('modal-overlay');
