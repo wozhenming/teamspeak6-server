@@ -594,6 +594,36 @@ async function myInfo() {
   }
 }
 
+// 把查询端移动到目标频道（带权威校验 + 失败重置重试）。
+// 这台服务器的 ServerQuery clientmove 会“谎报” id=770 already member（其实真实频道树并未改变），
+// 因此不再把 id=770 当成功，而是：先踢到“另一频道”重置 ServerQuery 的陈旧视图，再移动到目标，
+// 最后用 ts6-manager 的权威客户端列表校验点歌助手是否真到了目标 cid。返回是否成功。
+async function moveQueryBotTo(targetCid, myClid) {
+  const cpw = (config.ts6mgrChannelPassword || '').trim();
+  const target = String(targetCid);
+  const other = target === '1' ? '2' : '1';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // 1) 重置：先挪到另一频道，纠正 ServerQuery 可能谎报的“已在目标频道”状态
+    try { await cmd('clientmove cid=' + other + ' clid=' + myClid + (cpw ? ' cpw=' + cpw : '')); }
+    catch (e) { /* other 可能已在/无权限，忽略 */ }
+    await new Promise((r) => setTimeout(r, 600));
+    // 2) 再移动到目标频道
+    try {
+      await cmd('clientmove cid=' + target + ' clid=' + myClid + (cpw ? ' cpw=' + cpw : ''));
+    } catch (e) {
+      if (!/id=770|already[^a-z]*member/i.test(e.message || String(e))) console.log('[tschat] clientmove 失败：' + (e.message || e));
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    // 3) 权威校验
+    try {
+      const real = await tsbridge.getClientCidByName(myNick);
+      if (real === target) { console.log('[tschat] 已 clientmove 到频道 ' + target + '（权威校验通过）'); return true; }
+    } catch (e) { /* 忽略 */ }
+  }
+  console.log('[tschat] clientmove 到频道 ' + target + ' 后权威视图仍未到位');
+  return false;
+}
+
 // 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
 // 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
 // 否则查询端停留在旧频道，收不到新频道的 !点歌 等指令。
@@ -661,25 +691,8 @@ async function joinBotChannelBody() {
       + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(',')
       + ' | channellist=' + JSON.stringify(chItems.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
     if (botCid && myClid) {
-      const cpw = (config.ts6mgrChannelPassword || '').trim();
-      let moved = false;
-      for (let attempt = 0; attempt < 3 && !moved; attempt++) {
-        try {
-          let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
-          if (cpw) cmdStr += ' cpw=' + cpw;
-          await cmd(cmdStr);
-          console.log('[tschat] 已 clientmove 到频道 ' + botCid + (cpw ? '（带密码）' : ''));
-          moved = true;
-        } catch (e) {
-          // error id=770 already member of channel：说明已经在目标频道，视为成功
-          // TS 报错里空格被转义成 \s，故用 [^a-z]* 兼容（或直接匹配 id=770）
-          if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) { moved = true; console.log('[tschat] 已在频道 ' + botCid + '，无需移动'); }
-          else {
-            console.log('[tschat] clientmove 第 ' + (attempt + 1) + ' 次失败：' + (e.message || e));
-            if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-          }
-        }
-      }
+      const ok = await moveQueryBotTo(botCid, myClid);
+      if (!ok) console.log('[tschat] 警告：clientmove 未能使点歌助手进入目标频道（ServerQuery 移动可能受限）');
     }
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
       try { await cmd('servernotifyregister event=' + ev); }
