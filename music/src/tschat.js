@@ -529,16 +529,24 @@ function findMe(items) {
 // 取查询客户端自身的位置。ServerQuery 客户端常不在 clientlist 中露出自己，
 // 故优先用 whoami（返回 clid/cid）拿到自身的 clid，clientmove 缺它无法移动。
 async function myInfo() {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const w = await cmd('whoami');
+      if (w && (w.clid != null || w.cid != null)) {
+        return { clid: w.clid != null ? w.clid : null, cid: w.cid != null ? w.cid : null, via: 'whoami' };
+      }
+    } catch (e) { /* 重试 */ }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 800));
+  }
+  // 兜底：从 clientlist 里找自己（ServerQuery 客户端 often 不在此列出，故可能为空）
   try {
-    const w = await cmd('whoami');
-    if (w && (w.clid != null || w.cid != null)) {
-      return { clid: w.clid != null ? w.clid : null, cid: w.cid != null ? w.cid : null, via: 'whoami' };
-    }
-  } catch (e) { /* 退回 clientlist 定位 */ }
-  const list = await cmd('clientlist -uid');
-  const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-  const m = findMe(items);
-  return { clid: m ? clidOf(m) : null, cid: m ? cidOf(m) : null, via: 'list' };
+    const list = await cmd('clientlist -uid');
+    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+    const m = findMe(items);
+    return { clid: m ? clidOf(m) : null, cid: m ? cidOf(m) : null, via: 'list' };
+  } catch (e) {
+    return { clid: null, cid: null, via: 'none' };
+  }
 }
 
 // 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
@@ -556,7 +564,24 @@ async function joinBotChannel() {
     const me = await myInfo();
     const myClid = me.clid;
     const myCid = me.cid;
-    const { cid: botCid, botSeen, botName } = resolveTargetCid(items, chItems, myCid);
+    // 优先用 ts6-manager（对 TS 有完整可见性）按已配置频道名解析目标 cid；
+    // 查询端（ServerQuery 客户端）本身对频道/机器人可见性不稳定，不能依赖它的 clientlist/channellist。
+    let botCid = null;
+    let botName = '';
+    let botSeen = false;
+    try {
+      const channels = await tsbridge.listChannels();
+      const want = (config.ts6mgrChannel || '').trim().toLowerCase();
+      const leaf = want.split('/').pop();
+      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
+        || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
+      if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
+    } catch (e) { /* 退回查询端解析 */ }
+    // 退回：用查询端 clientlist 里直接看到的机器人/语音客户端推断
+    if (!botCid) {
+      const r = resolveTargetCid(items, chItems, myCid);
+      botCid = r.cid; botName = r.name; botSeen = r.botSeen;
+    }
     console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
       + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
       + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(','));
@@ -617,10 +642,28 @@ async function ensureInBotChannel() {
     const me = await myInfo();
     const myClid = me.clid;
     const myCid = me.cid;
-    const bot = findBot(items);
-    if (bot && myClid && String(cidOf(bot)) !== String(myCid)) {
-      await cmd('clientmove cid=' + cidOf(bot) + ' clid=' + myClid);
-      console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + cidOf(bot));
+    // 优先用 ts6-manager（完整可见性）按已配置频道名解析目标 cid，避免 ServerQuery 客户端看不到机器人/频道
+    let botCid = null;
+    try {
+      const channels = await tsbridge.listChannels();
+      const want = (config.ts6mgrChannel || '').trim().toLowerCase();
+      const leaf = want.split('/').pop();
+      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
+        || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
+      if (hit) botCid = hit.id;
+    } catch (e) { /* 退回 clientlist 解析 */ }
+    if (!botCid) {
+      const bot = findBot(items);
+      if (bot) botCid = cidOf(bot);
+    }
+    if (botCid && myClid && String(botCid) !== String(myCid)) {
+      try {
+        let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
+        const cpw = (config.ts6mgrChannelPassword || '').trim();
+        if (cpw) cmdStr += ' cpw=' + cpw;
+        await cmd(cmdStr);
+        console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + botCid);
+      } catch (e) { console.log('[tschat] 自动跟随移动失败：' + (e.message || e)); }
     }
     // 重新订阅聊天事件，防止订阅被服务器静默取消导致收不到 !点歌
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
