@@ -312,6 +312,8 @@ let linking = null;          // 串行化 link()，避免并发点击重复建 b
 let desiredLinked = false;   // 用户意图：应保持连接（用于看门狗判断是否需自愈）
 let autoPausedByEmpty = false; // 因“频道无人”而自动暂停（用于有人进入时自动恢复）
 let watchdogTimer = null;
+let switching = null;        // 串行化 switchChannel，避免来回快速切换并发 restart 把机器人搞丢
+let switchPendingChannel = null; // 以最后一次切换请求为准（最新胜利）
 
 // 取机器人所在频道的“在线客户端数”（含机器人自身）。依赖 ts6-manager 的频道列表。
 // 返回数字；无法判断（未配置频道/接口缺字段）时返回 null，调用方应忽略。
@@ -433,39 +435,69 @@ async function unlink() {
 // 切换机器人所在频道：更新 defaultChannel 后重启机器人进入新频道（保留播放队列/电台流）
 // 注意：必须“完全断开”（stop）再重连，单停播放（stop-playback）不会让 bot 离开旧频道，
 // 那样 start 只是原地恢复，造成“提示切换成功但实际没动”的现象。
-async function switchChannel(channelPath) {
-  const path = (channelPath || '').trim();
-  if (!path) throw new Error('频道不能为空');
+//
+// 来回快速切换会并发触发多个 restart，把机器人状态搞乱甚至“消失”（play-radio 报
+// “Bot is not connected”）。这里用 switching 互斥 + 最新胜利队列串行化，并对每一步做重试。
+function switchChannel(channelPath) {
+  switchPendingChannel = channelPath; // 始终以最后一次请求为准
+  if (switching) return switching;
+  switching = (async () => {
+    try {
+      while (switchPendingChannel != null) {
+        const path = switchPendingChannel;
+        switchPendingChannel = null;
+        await switchChannelInner(path);
+      }
+      return { ok: true };
+    } finally {
+      switching = null;
+      switchPendingChannel = null;
+    }
+  })();
+  return switching;
+}
+
+async function switchChannelInner(path) {
+  const p = (path || '').trim();
+  if (!p) throw new Error('频道不能为空');
   // 立即持久化新频道，使后续 start/restart 使用它作为 defaultChannel
-  try { config.saveTsBridge({ ts6mgrChannel: path }); } catch (e) { /* 忽略 */ }
+  try { config.saveTsBridge({ ts6mgrChannel: p }); } catch (e) { /* 忽略 */ }
   const token = await getToken();
   const c = cfg();
-  const bots = await getBots(token);
-  const bot = pickBot(c, bots) || bots[0];
-  if (!bot) {
-    // 还没有建过机器人：走完整 link（创建并以新频道加入）
-    return await link();
-  }
-  const botId = bot.id;
-  // 1) 更新目标频道
-  try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: path }); } catch (e) { /* 忽略 */ }
-  // 2) 重启机器人（离开旧频道并以新频道重新加入）
-  let r = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
-  if (r.status !== 200) {
-    // 退回：完全停止后重新 link（link 内部会再次 PUT 频道并 start）
-    await authFetch('POST', '/api/music-bots/' + botId + '/stop', token);
-    return await link();
-  }
-  await waitBotConnected(token, botId);
-  // 3) 恢复电台流（默认频道变了，bot 重启后需要重新下达 play-radio）
   const serverConfigId = await ensureServer(token, c);
   const stationId = await ensureStation(token, serverConfigId);
-  const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
-  if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
-  try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: path }); } catch (e) { /* 忽略 */ }
-  desiredLinked = true;
-  startWatchdog();
-  return { ok: true, botId, stationId, serverConfigId };
+  let bots = await getBots(token);
+  let bot = pickBot(c, bots) || bots[0];
+  if (!bot) return await link(); // 还没建过机器人：走完整 link
+  const botId = bot.id;
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      // 1) 更新目标频道
+      try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: p }); } catch (e) { /* 忽略 */ }
+      // 2) 重启机器人（离开旧频道并以新频道重新加入）
+      const r = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
+      if (r.status !== 200) {
+        await authFetch('POST', '/api/music-bots/' + botId + '/stop', token);
+      }
+      // 3) 等真正连上频道（避免 “Bot is not connected”）
+      const ok = await waitBotConnected(token, botId, 25);
+      if (!ok) throw new Error('机器人重连超时（Bot is not connected）');
+      // 4) 恢复电台流（默认频道变了，bot 重启后需要重新下达 play-radio）
+      const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
+      if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+      try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: p }); } catch (e) { /* 忽略 */ }
+      desiredLinked = true;
+      startWatchdog();
+      return { ok: true, botId, stationId, serverConfigId };
+    } catch (e) {
+      lastErr = e;
+      console.log('[tsbridge] 切换频道第 ' + (attempt + 1) + ' 次失败：' + (e && e.message));
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  // 兜底：完整重连一次（以新频道重新创建/启动机器人）
+  try { return await link(); } catch (e) { throw lastErr || e; }
 }
 
 // 带 token 失效重试：401 时强制重新登录再试一次

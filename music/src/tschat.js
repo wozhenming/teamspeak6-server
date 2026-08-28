@@ -499,6 +499,25 @@ function connect() {
 
 let bootstrapped = false;
 let reconcileTimer = null; // 定时自检并跟随机器人频道，防止二者漂移
+let myNick = '';           // 本查询端昵称，用于从 clientlist 中定位自己
+// 机器人昵称（可配置，默认“点歌机器人”）：部分服务器昵称带前后缀，可用 TS_CHAT_BOT_NICKNAME 覆盖
+const BOT_NAME = (process.env.TS_CHAT_BOT_NICKNAME || '点歌机器人').trim();
+
+// 兼容 TS3/TS6 字段命名差异（clid/client_id、cid/channel_id）
+function cidOf(x) { return x.cid != null ? x.cid : x.channel_id; }
+function clidOf(x) { return x.clid != null ? x.clid : x.client_id; }
+function findBot(items) {
+  return items.find((x) => x.client_nickname === BOT_NAME)
+    || items.find((x) => x.client_nickname && x.client_nickname.includes(BOT_NAME));
+}
+function findMe(items) {
+  if (myNick) {
+    const m = items.find((x) => x.client_nickname === myNick)
+      || items.find((x) => x.client_nickname && String(x.client_nickname).startsWith(myNick));
+    if (m) return m;
+  }
+  return items.find((x) => String(x.client_type) === '1'); // 退化：取任一 ServerQuery 客户端
+}
 
 // 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
 // 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
@@ -506,26 +525,32 @@ let reconcileTimer = null; // 定时自检并跟随机器人频道，防止二�
 async function joinBotChannel() {
   if (!conn) return; // 连接已断开时不操作
   try {
-    const who = await cmd('whoami');
-    // TS6 的 whoami 字段为 client_id / client_channel_id（非 TS3 的 clid/cid）
-    const myClid = who.client_id != null ? who.client_id : who.clid;
-    const myCid = who.client_channel_id != null ? who.client_channel_id : who.cid;
     const list = await cmd('clientlist -uid');
-    const rawItems = Array.isArray(list) ? list : [list];
-    const items = rawItems.filter(Boolean);
+    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
+    const me = findMe(items);
+    const myClid = me ? clidOf(me) : null;
+    const myCid = me ? cidOf(me) : null;
     const { cid: botCid, botSeen } = resolveTargetCid(items, chItems, myCid);
+    console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
+      + ' botCid=' + botCid + ' botSeen=' + botSeen
+      + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(','));
     if (botCid && myClid && String(botCid) !== String(myCid)) {
-      await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
+      try {
+        await cmd('clientmove cid=' + botCid + ' clid=' + myClid);
+        console.log('[tschat] 已 clientmove 到频道 ' + botCid);
+      } catch (e) {
+        console.log('[tschat] clientmove 失败：' + (e.message || e));
+      }
     }
     // 订阅频道聊天 + 私聊 + 服务器聊天，尽量覆盖用户的不同发送方式
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
       try { await cmd('servernotifyregister event=' + ev); }
       catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
     }
-    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
-    console.log('[tschat] 已移动到频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
+    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人(' + BOT_NAME + ')，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
+    console.log('[tschat] 已就位频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
   } catch (e) {
     console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
   }
@@ -534,18 +559,17 @@ async function joinBotChannel() {
 // 解析目标频道 cid：1) 已配置频道名/路径；2) 机器人昵称；3) 兜底第一个语音用户频道
 function resolveTargetCid(items, chItems, myCid) {
   const wantName = (config.ts6mgrChannel || '').trim();
-  let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
+  const bot = findBot(items);
+  const botSeen = !!bot;
   if (wantName) {
     const leaf = wantName.split('/').pop();
     const ch = chItems.find((x) => (x.channel_name || '') === wantName)
       || chItems.find((x) => (x.channel_name || '').endsWith(leaf));
-    if (ch) return { cid: ch.cid, botSeen };
+    if (ch) return { cid: cidOf(ch), botSeen };
   }
-  const bot = items.find((x) => x.client_nickname === '点歌机器人')
-    || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
-  if (bot) return { cid: bot.cid, botSeen: true };
+  if (bot) return { cid: cidOf(bot), botSeen: true };
   const voice = items.find((x) => String(x.client_type) !== '1');
-  if (voice && String(voice.cid) !== String(myCid) && voice.cid != null) return { cid: voice.cid, botSeen };
+  if (voice && String(cidOf(voice)) !== String(myCid) && cidOf(voice) != null) return { cid: cidOf(voice), botSeen };
   return { cid: null, botSeen };
 }
 
@@ -554,16 +578,15 @@ function resolveTargetCid(items, chItems, myCid) {
 async function ensureInBotChannel() {
   if (state !== 'listening' || !conn) return;
   try {
-    const who = await cmd('whoami');
-    const myClid = who.client_id != null ? who.client_id : who.clid;
-    const myCid = who.client_channel_id != null ? who.client_channel_id : who.cid;
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const bot = items.find((x) => x.client_nickname === '点歌机器人')
-      || items.find((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
-    if (bot && myClid && String(bot.cid) !== String(myCid)) {
-      await cmd('clientmove cid=' + bot.cid + ' clid=' + myClid);
-      console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + bot.cid);
+    const me = findMe(items);
+    const myClid = me ? clidOf(me) : null;
+    const myCid = me ? cidOf(me) : null;
+    const bot = findBot(items);
+    if (bot && myClid && String(cidOf(bot)) !== String(myCid)) {
+      await cmd('clientmove cid=' + cidOf(bot) + ' clid=' + myClid);
+      console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + cidOf(bot));
     }
     // 重新订阅聊天事件，防止订阅被服务器静默取消导致收不到 !点歌
     for (const ev of ['textchannel', 'textprivate', 'textserver']) {
@@ -585,6 +608,7 @@ async function bootstrap() {
       await cmd('clientupdate client_nickname=' + esc(nick));
     }
     // 找到机器人所在频道并移过去（查询客户端只能收到自己所在频道的聊天）
+    myNick = nick;
     await joinBotChannel();
     bootstrapped = true;
     state = 'listening';
