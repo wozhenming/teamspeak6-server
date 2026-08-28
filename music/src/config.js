@@ -10,7 +10,7 @@ const env = (k, f) => {
 };
 
 // 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，clear=清队列，search=搜索，queue=队列，loop=循环，status=状态，switch=切频道
-const CHAT_CMD_DEFAULT = { dian: true, play: true, pause: true, next: true, clear: true, search: true, queue: true, loop: true, status: true, switch: true };
+const CHAT_CMD_DEFAULT = { dian: true, play: true, playat: true, pause: true, next: true, clear: true, search: true, queue: true, loop: true, status: true, switch: true };
 
 const config = {
   // music-bot 自身监听

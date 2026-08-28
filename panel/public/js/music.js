@@ -107,6 +107,7 @@ TSPages.music = async function () {
           <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12px" id="ts-cmd-box">
             <label class="ts-toggle"><input type="checkbox" data-cmd="dian"> 点歌</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="play"> 播放</label>
+            <label class="ts-toggle"><input type="checkbox" data-cmd="playat"> 播放第N首</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="pause"> 暂停</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="next"> 切歌</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="clear"> 清队列</label>
@@ -121,7 +122,7 @@ TSPages.music = async function () {
             <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
-          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
+           <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放(第N首)</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <div class="muted" style="font-size:12px;font-weight:600">音质与行为</div>
@@ -731,6 +732,7 @@ TSPages.music = async function () {
   const CHAT_CMD_HELP = [
     { cmd: '!点歌', alias: '!点 · !dian · !song · !req · !点播', ex: '!点歌 2652820720', desc: '点播歌曲（歌曲ID或网易云分享链接）' },
     { cmd: '!播放', alias: '!继续 · !resume · !play · !开始', ex: '!播放', desc: '开始 / 继续播放' },
+    { cmd: '!播放第N首', alias: '!播第N首 · !播N · !跳N · !第N首 · !play N', ex: '!播放第3首', desc: '跳播队列第 N 首（1 基）' },
     { cmd: '!暂停', alias: '!pause', ex: '!暂停', desc: '暂停播放' },
     { cmd: '!切歌', alias: '!下一首 · !next · !skip', ex: '!切歌', desc: '切到下一首' },
     { cmd: '!清队列', alias: '!清空队列 · !清队 · !清掉队列 · !clear', ex: '!清队列', desc: '清空点歌队列并停止播放' },

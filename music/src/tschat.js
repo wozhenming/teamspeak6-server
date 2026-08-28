@@ -121,6 +121,8 @@ function runControl(cmd, invokerName, arg) {
   try {
     const st = player.get();
     if (cmd === 'play') {
+      const at = parsePosition(arg);
+      if (at) { runPlayAt(at, invokerName); return; }
       if (!st.current) player.play();
       else player.resume();
       require('./tsbridge').resumeRadio().catch(() => {});
@@ -188,6 +190,29 @@ function runClear(invokerName) {
   } catch (e) {
     reply(invokerName, '✖ 清空失败：' + e.message);
   }
+}
+
+// 从 "!第3首" / "3" / "第 3 首" / "3首" 中解析 1 基序号
+function parsePosition(text) {
+  if (text == null) return null;
+  const m = String(text).match(/第?\s*(\d+)\s*(?:首|位|个|song)?/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// 跳播队列指定位置（1 基）：!播放第3首 / !播3 / !跳3 / !播放 3
+function runPlayAt(n, invokerName) {
+  const all = queue.all();
+  if (!all.length) return reply(invokerName, '队列为空，用 !点歌 <ID> 添加歌曲');
+  if (!Number.isInteger(n) || n < 1 || n > all.length) {
+    return reply(invokerName, '✖ 队列只有 ' + all.length + ' 首，无法播放第 ' + n + ' 首');
+  }
+  const item = all[n - 1];
+  const res = player.play(item.id);
+  const played = res.current || item;
+  require('./tsbridge').resumeRadio().catch(() => {});
+  reply(invokerName, '▶ 已跳播第 ' + n + ' 首：' + (played.title || played.name) + (played.artists ? ' - ' + played.artists : ''));
 }
 
 // 查看播放队列（分页，每页最多 10 首）：!队列 [页码]
@@ -323,7 +348,7 @@ function runStatus(invokerName) {
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', switch: 'switch' };
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', switch: 'switch', playat: 'playat' };
 function handleRequest(rawText, invokerName) {
   const text = (rawText || '').trim();
   if (!text) return;
@@ -352,7 +377,14 @@ function handleRequest(rawText, invokerName) {
       addSong(rest, invokerName);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放 · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !切频道 <频道名> · !循环 · !状态');
+    // 跳播队列第 N 首：!播放第3首 / !播3 / !跳3 / !第3首 / !play3
+    const playAtMatch = text.match(/^!\s*(?:播|播放|跳|选|放|第|play|jump|goto|select|p)\s*第?\s*(\d+)\s*(?:首|位|个|song)?\s*$/i);
+    if (playAtMatch) {
+      if (!cmdEnabled('playat')) return reply(invokerName, '该指令已被管理员禁用');
+      runPlayAt(parseInt(playAtMatch[1], 10), invokerName);
+      return;
+    }
+    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放(第N首) · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !切频道 <频道名> · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
