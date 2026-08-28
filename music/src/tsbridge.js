@@ -682,12 +682,14 @@ function clientNick(cl) {
 // （♪），以免与“仅叫点歌机器人”的普通用户混淆。targetNick 为 ts6-manager 记录的机器人昵称。
 function findMusicBot(list, targetNick) {
   if (!Array.isArray(list) || !list.length) return null;
-  // 0) 已缓存 UID：优先按 UID 匹配（不可能被改名伪造）
+  const base = (targetNick || '点歌机器人') + '';
+  // 0) 已缓存 UID：真实音乐机器人名必含 ♪ 标记，仅当该 UID 对应客户端仍含 ♪ 才采信；
+  //    否则视为缓存失效（例如曾被误写成某用户 UID），清空后改回按昵称识别。
   if (musicBotUid) {
     const byUid = list.find((cl) => clientUid(cl) && clientUid(cl) === musicBotUid);
-    if (byUid) return byUid;
+    if (byUid && clientNick(byUid).includes('♪')) return byUid;
+    musicBotUid = null;
   }
-  const base = (targetNick || '点歌机器人') + '';
   // 1) 同时含机器人名 + 专属标记（♪）：精准锁定真正音乐机器人，排除仅叫“点歌机器人”的普通用户
   const marked = list.find((cl) => {
     const n = clientNick(cl);
@@ -700,12 +702,8 @@ function findMusicBot(list, targetNick) {
     return n === ('♪ ' + base) || n === (base + ' ♪ 点歌机器人') || n === ('点歌机器人 ♪ 点歌机器人');
   });
   if (exact) return exact;
-  // 3) 兜底：仅当列表里“没有任何带 ♪ 的机器人名”时，才退回裸昵称子串匹配（可能误匹配，但保证可用）
-  const anyMarked = list.some((cl) => {
-    const n = clientNick(cl);
-    return n.includes(base) && n.includes('♪');
-  });
-  if (!anyMarked) return list.find((cl) => clientNick(cl).includes(base));
+  // 不再退回到裸昵称子串匹配：当无法“确信”识别出音乐机器人时，宁可返回 null（由上层退回配置频道），
+  // 也绝不去跟随一个仅叫“点歌机器人”的普通用户，避免被改名劫持。
   return null;
 }
 
