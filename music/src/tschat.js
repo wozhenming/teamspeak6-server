@@ -571,23 +571,24 @@ async function joinBotChannelBody() {
     const me0 = await myInfo();
     const myClid0 = me0.clid;
     const myCid0 = me0.cid;
-    // 优先用 ts6-manager（对 TS 有完整可见性）按已配置频道名解析目标 cid；
-    // 查询端（ServerQuery 客户端）本身对频道/机器人可见性不稳定，不能依赖它的 clientlist/channellist。
+    // 关键：ServerQuery 的频道 id 与 ts6-manager 的频道 id 是两套不同的编号空间。
+    // 查询端 clientmove 必须用「ServerQuery 自己的 channellist」按频道名解析出的 cid，
+    // 直接用 ts6-manager 的 id 会指向错误的频道（报 already member 或挪错房间）。
     let botCid = null;
     let botName = '';
     let botSeen = false;
-    try {
-      const channels = await tsbridge.listChannels();
-      const want = (config.ts6mgrChannel || '').trim().toLowerCase();
-      const leaf = want.split('/').pop();
-      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
-        || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
-      if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
-    } catch (e) { /* 退回查询端解析 */ }
-    // 退回：用查询端 clientlist 里直接看到的机器人/语音客户端推断
+    const r = resolveTargetCid(items, chItems, myCid0);
+    botCid = r.cid; botName = r.name; botSeen = r.botSeen;
     if (!botCid) {
-      const r = resolveTargetCid(items, chItems, myCid0);
-      botCid = r.cid; botName = r.name; botSeen = r.botSeen;
+      // 退回：用 ts6-manager 解析（注意其 id 空间可能不同，仅作兜底）
+      try {
+        const channels = await tsbridge.listChannels();
+        const want = (config.ts6mgrChannel || '').trim().toLowerCase();
+        const leaf = want.split('/').pop();
+        const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
+          || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
+        if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
+      } catch (e) { /* 忽略 */ }
     }
     // 移动前再读一次自身位置（消除并发调用间读到的过期 myCid）
     const me = await myInfo();
@@ -595,7 +596,8 @@ async function joinBotChannelBody() {
     const myCid = me.cid != null ? me.cid : myCid0;
     console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid=' + myCid
       + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
-      + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(','));
+      + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(',')
+      + ' | channellist=' + JSON.stringify(chItems.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
     if (botCid && myClid && String(botCid) !== String(myCid)) {
       const cpw = (config.ts6mgrChannelPassword || '').trim();
       let moved = false;
@@ -608,7 +610,8 @@ async function joinBotChannelBody() {
           moved = true;
         } catch (e) {
           // error id=770 already member of channel：说明已经在目标频道，视为成功
-          if (/already\s*member/i.test(e.message || String(e))) { moved = true; console.log('[tschat] 已在频道 ' + botCid + '，无需移动'); }
+          // TS 报错里空格被转义成 \s，故用 [^a-z]* 兼容（或直接匹配 id=770）
+          if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) { moved = true; console.log('[tschat] 已在频道 ' + botCid + '，无需移动'); }
           else {
             console.log('[tschat] clientmove 第 ' + (attempt + 1) + ' 次失败：' + (e.message || e));
             if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
@@ -689,7 +692,7 @@ async function ensureInBotChannelBody() {
         await cmd(cmdStr);
         console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + botCid);
       } catch (e) {
-        if (/already\s*member/i.test(e.message || String(e))) console.log('[tschat] 已在频道 ' + botCid + '（自动跟随）');
+        if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) console.log('[tschat] 已在频道 ' + botCid + '（自动跟随）');
         else console.log('[tschat] 自动跟随移动失败：' + (e.message || e));
       }
     }
