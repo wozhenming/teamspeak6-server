@@ -319,6 +319,7 @@ app.get('/api/ts-bot/config', (req, res) => {
     ts6mgrPass: config.ts6mgrPass,
     ts6mgrBotId: config.ts6mgrBotId,
     ts6mgrChannel: config.ts6mgrChannel,
+    ts6mgrChannels: Array.isArray(config.ts6mgrChannels) ? config.ts6mgrChannels : [],
     ts6mgrBotNickname: config.ts6mgrBotNickname || '点歌机器人',
     ts6mgrChannelPassword: config.ts6mgrChannelPassword || '',
     streamPublicUrl: config.streamPublicUrl,
@@ -365,22 +366,9 @@ app.post('/api/ts-bot/link', async (req, res) => {
 app.post('/api/ts-bot/unlink', async (req, res) => {
   try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }
 });
-// 彻底删除 ts6-manager 里的点歌机器人（之后可用「重新连接」重建）
+// 彻底删除 ts6-manager 里我们部署的所有点歌机器人（之后可用「生成机器人 / 重建连接」重建）
 app.delete('/api/ts-bot/bot', async (req, res) => {
   try { ok(res, await tsbridge.deleteBot()); } catch (e) { fail(res, 502, 'TS_DEL_BOT_FAIL', e.message); }
-});
-app.post('/api/ts-bot/switch-channel', async (req, res) => {
-  try {
-    const ch = (req.body && req.body.channel) || '';
-    if (!ch.trim()) return fail(res, 400, 'BAD_REQUEST', '频道不能为空');
-    const r = await tsbridge.switchChannel(ch);
-    // 机器人切到新频道后，让聊天点歌的查询客户端也移动到新频道，否则收不到该频道的 !点歌 等指令
-    try {
-      await new Promise((res) => setTimeout(res, 1500)); // 等机器人真正进入新频道、TS 列表刷新
-      await tschat.rejoinChannel();
-    } catch (e) { console.log('[switch] 聊天端重连频道失败: ' + (e && e.message)); }
-    ok(res, r);
-  } catch (e) { fail(res, 502, 'TS_SWITCH_FAIL', e.message); }
 });
 app.get('/api/ts-bot/channels', async (req, res) => {
   try { ok(res, await tsbridge.listChannels()); } catch (e) { fail(res, 400, 'TS_CHANNELS_FAIL', e.message); }

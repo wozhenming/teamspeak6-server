@@ -58,20 +58,27 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 - **版权/解灰**：拿不到直链时自动走 `/song/url/match` 解灰(UnblockNeteaseMusic)，仍失败跳下一首并记原因。
 
 ### 4. ts6-manager 对接（music/src/tsbridge.js）
+- **每频道固定部署**：面板配置部署频道列表（`ts6mgrChannels`），每个频道固定一个点歌机器人 +
+  一个点歌助手，绑定后**不跨频道移动**（频道→botId 持久化在 `ts6mgrChannelBots`）。
+  机器人命名：单频道用配置昵称原名，多频道自动加「·频道名」后缀；点歌助手同规则。
 - 自动建连：`ensureAdmin`（自动登录/创建 ts6-manager 管理员）、`ensureServer`（自动创建指向本
-  TS 的连接，**指纹变化才 PUT**，避免切页触发连接池重置）、`ensureBot`（按名字复用，不重复建）、
-  `ensureStation`、`play-radio`。
+  TS 的连接，**指纹变化才 PUT**，避免切页触发连接池重置）、`ensureBotForChannel`（按绑定/名字
+  复用，不重复建）、`ensureStation`（所有机器人共用一路电台流，队列全局共享）。
+- **看门狗自愈**（15s）：逐频道检查机器人在线，掉线自动 start+play-radio；同时执行
+  「所有部署频道都无人 → 自动暂停，任一频道有人 → 自动恢复」（按 clients 端点 client_type
+  只统计真实语音用户，排除机器人自身与 ServerQuery 客户端）。
 - JWT **token 缓存 10 分钟**(401 自动重登)，避免轮询/切页反复登录撞 auth 限流。
-- **恢复播放自愈**：暂停后机器人可能放弃电台流连接，恢复播放时额外重下达 `play-radio`。
 
 ### 5. TS 频道聊天点歌（music/src/tschat.js）★核心特色
-- **SSH ServerQuery 监听**：以 serveradmin 登 TS 的 SSH Query(10022)（`shell(false)` 无伪终端，
-  **等服务端 TS3 横幅后才发命令**），加入点歌机器人所在频道，`servernotifyregister event=textchannel/
-  textprivate/textserver`，接收频道聊天消息。
-- **指令**（支持中/英文，面板可逐项开启/关闭）：
+- **每频道一个点歌助手**：每个部署频道各一条独立 SSH ServerQuery 连接（`shell(false)` 无伪
+  终端，**等 TS3 横幅后才发命令**），启动后**驻留自己的频道**并订阅 `textchannel/textprivate`
+  （textserver 仅挂在第一个会话上避免多助手重复应答），固定不移动。
+- **指令**（支持中/英文，面板可逐项开启/关闭；全局队列，任一频道点歌全局生效）：
   - `!点歌 <歌曲ID|网易云链接>`（或裸 ID/链接）→ 自动提取 ID 入队并自动开播
-  - `!播放`/`!继续`、`!暂停`、`!切歌`/`!下一首`、`!循环 <列表|单曲|随机|关>`、`!状态`
-- 单命令应答 FIFO 分发器（防多监听器抢行）；断线指数重连；昵称冲突自愈；频道回执结果。
+  - `!播放(第N首)`/`!继续`、`!暂停`、`!切歌`/`!下一首`、`!清队列`、`!搜索`、`!队列 [页码]`、
+    `!循环 <列表|单曲|随机|关>`、`!状态`
+- 每会话独立命令 FIFO；错峰连接（1.5s/个）防查询洪水限制；断线自动重连；昵称冲突自愈；
+  回执发到指令所在频道。
 
 ### 6. Web 管理面板（panel）
 - **多页面**：仪表盘、服务器/频道/用户/权限管理、点歌页、部署管理、统计。
@@ -79,7 +86,8 @@ Docker 一键部署的全栈项目：TeamSpeak 6 服务器 + Web 管理面板 + 
 - **用户管理连接时长**：TS6 的 `connection_connected_time` 是**周期性快照**，会冻结/跳变；
   `utils/smooth.js` 以**本地单调时钟为主 + 快照校准/重置识别/尖峰过滤**，让显示每秒平滑递增。
 - **部署管理**：检测 Docker/Compose、提取服务器管理员初识凭证、WebQuery 连通性与版本显示。
-- **点歌页设置**：TS WebQuery API Key、频道下拉、频道聊天点歌开关 + 各指令开关、网易云登录信息。
+- **点歌页设置**：TS WebQuery API Key、部署频道列表（每频道固定机器人+点歌助手）、频道聊天
+  点歌开关 + 各指令开关、网易云登录信息。
 
 ### 7. Docker 部署（docker-compose.yml）
 - 全部服务同一 `ts6` 网络；services：teamspeak / neteasemusic / music / panel / backend / sidecar / frontend。

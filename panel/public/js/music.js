@@ -26,6 +26,7 @@ TSPages.music = async function () {
   let playerState = { current: null, position: 0, playing: false, loopMode: 'all', queueLength: 0 };
   let playerTick = null;
   let pollTimer = null;
+  let statusTimer = null;
   let lastPollAt = 0;
   let seeking = false;
 
@@ -78,14 +79,16 @@ TSPages.music = async function () {
           <input class="input" id="ts-key" type="password" placeholder="填入 apikeyadd 生成的 Key" style="flex:1">
         </div>
         <div style="display:flex;flex-direction:column;gap:3px">
-          <span class="muted" style="font-size:12px">让点歌机器人加入的频道（音频推到这个频道）</span>
+          <span class="muted" style="font-size:12px">部署频道（每个频道固定一个点歌机器人和一个点歌助手，不会移动到别的频道）</span>
+          <div id="ts-channel-list" style="display:flex;flex-direction:column;gap:4px"></div>
           <div style="display:flex;gap:8px">
             <select id="ts-channel" class="select" style="flex:1">
               <option value="">（加载频道中…）</option>
             </select>
-            <button class="btn btn-sm btn-primary" id="btn-ts-switch" title="把机器人切换到所选频道">切换频道</button>
+            <button class="btn btn-sm btn-primary" id="btn-ts-channel-add">添加频道</button>
             <button class="btn btn-sm" id="btn-ts-refresh" title="保存 Key 并刷新频道列表">↻</button>
           </div>
+          <span class="muted" style="font-size:11px">所有频道的机器人播放同一路电台流（点歌队列共享，任一频道点歌全局生效）；移除频道后需在「机器人管理」删除对应机器人。</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <div class="muted" style="font-size:12px;font-weight:600">音质与行为</div>
@@ -141,10 +144,10 @@ TSPages.music = async function () {
 
     <div class="card">
       <h3><span>机器人管理</span></h3>
-      <div class="muted" style="font-size:11.5px;margin-bottom:10px">点歌机器人：加入频道推流的音乐机器人；点歌助手：驻留频道接收 <code>!点歌</code> 等聊天指令的查询端。此处管理二者的身份与生命周期，推流参数在「TeamSpeak 推流」卡片配置。</div>
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px">点歌机器人：加入频道推流的音乐机器人（每个部署频道一个，固定驻留）；点歌助手：驻留频道接收 <code>!点歌</code> 等聊天指令的查询端（与机器人同频道）。此处管理二者的身份与生命周期，推流参数在「TeamSpeak 推流」卡片配置。</div>
       <div style="display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;flex-direction:column;gap:3px">
-          <span class="muted" style="font-size:12px">点歌机器人昵称（改名后填实际昵称，点歌助手据此跟随）</span>
+          <span class="muted" style="font-size:12px">点歌机器人昵称（多频道时自动加「·频道名」后缀区分，点歌助手同规则）</span>
           <input class="input" id="ts-bot-nickname" type="text" placeholder="点歌机器人" style="flex:1">
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
@@ -153,7 +156,7 @@ TSPages.music = async function () {
           <button class="btn btn-sm" id="btn-bot-refresh">刷新状态</button>
           <button class="btn btn-sm btn-danger" id="btn-bot-delete">删除机器人</button>
         </div>
-        <div class="muted" style="font-size:11px">填好上方 Key、选好频道后点「生成机器人 / 重建连接」，机器人会自动加入频道推流；「删除机器人」彻底移除 ts6-manager 中的机器人（不会删除本地歌单/队列数据）。</div>
+        <div class="muted" style="font-size:11px">填好上方 Key、添加部署频道后点「生成机器人 / 重建连接」，会为每个频道各部署一个机器人并自动推流；「删除机器人」移除所有部署的机器人（不会删除本地歌单/队列数据）。</div>
         <div style="display:flex;flex-direction:column;gap:6px;border-top:1px dashed var(--border);padding-top:8px">
           <div class="muted" style="font-size:12px;font-weight:600">点歌助手（频道聊天点歌）</div>
           <label class="ts-toggle" style="font-size:12.5px">
@@ -171,14 +174,13 @@ TSPages.music = async function () {
             <label class="ts-toggle"><input type="checkbox" data-cmd="queue"> 队列</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="loop"> 循环</label>
             <label class="ts-toggle"><input type="checkbox" data-cmd="status"> 状态</label>
-            <label class="ts-toggle"><input type="checkbox" data-cmd="switch"> 切频道</label>
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
             <button class="btn btn-sm" id="btn-ts-chat-save">保存聊天设置</button>
             <button class="btn btn-sm" id="btn-ts-chat-help">指令一览</button>
             <span class="muted" id="ts-chat-state" style="font-size:11.5px"></span>
           </div>
-          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放(第N首)</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code> · <code>!切频道 &lt;频道名&gt;</code></div>
+          <div class="muted" style="font-size:11px">频道聊天/私聊点歌助手：<code>!点歌 &lt;歌曲ID或链接&gt;</code> · <code>!播放(第N首)</code> · <code>!暂停</code> · <code>!切歌</code> · <code>!清队列</code> · <code>!搜索 &lt;关键词&gt;</code> · <code>!队列 [页码]</code></div>
         </div>
       </div>
     </div>
@@ -587,56 +589,99 @@ TSPages.music = async function () {
     queueQTimer = setTimeout(refreshQueue, 250); // 轻防抖，避免每个按键都打一次后端
   });
 
+  // ---------- 部署频道列表（每频道固定一个机器人+一个点歌助手） ----------
+  let tsChannelsAvail = []; // TS 上可用的频道（来自 ts6-manager）
+  let deployChannels = [];  // 已配置的部署频道
+
+  function renderChannelList() {
+    const box = $('ts-channel-list');
+    if (!deployChannels.length) {
+      box.innerHTML = '<div class="muted" style="font-size:12px">尚未配置部署频道，请从下方选择并「添加频道」</div>';
+    } else {
+      box.innerHTML = deployChannels.map((ch) => `<div style="display:flex;align-items:center;gap:8px;font-size:12.5px;border:1px solid var(--border);border-radius:8px;padding:4px 10px">
+        <span style="flex:1;word-break:break-all">${esc(ch)}</span>
+        <button class="btn btn-sm btn-danger" data-rmch="${esc(ch)}">移除</button>
+      </div>`).join('');
+    }
+    // 下拉只显示未添加的频道
+    const sel = $('ts-channel');
+    const avail = tsChannelsAvail.filter((c) => !deployChannels.includes(c.path || c.name));
+    sel.innerHTML = avail.length
+      ? avail.map((c) => `<option value="${esc(c.path || c.name)}">${esc(c.path || c.name)}</option>`).join('')
+      : '<option value="">（没有可添加的频道）</option>';
+  }
+
+  async function saveChannels() {
+    try {
+      await API.musicTsSaveConfig({ ts6mgrChannels: deployChannels.slice() });
+      TSUtils.toast('频道配置已保存。新增频道需点「生成机器人 / 重建连接」部署；移除频道的机器人可用「删除机器人」清理', 'success');
+    } catch (e) {
+      TSUtils.toast('保存失败：' + e.message, 'error');
+    }
+    renderChannelList();
+  }
+
+  $('btn-ts-channel-add').onclick = async () => {
+    const ch = $('ts-channel').value.trim();
+    if (!ch) { TSUtils.toast('请先从下拉选择要添加的频道（可点 ↻ 刷新列表）', 'error'); return; }
+    if (deployChannels.includes(ch)) { TSUtils.toast('该频道已在部署列表中', 'error'); return; }
+    deployChannels.push(ch);
+    await saveChannels();
+  };
+
+  $('ts-channel-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-rmch]');
+    if (!btn) return;
+    deployChannels = deployChannels.filter((c) => c !== btn.dataset.rmch);
+    await saveChannels();
+  });
+
   async function refreshTsStatus() {
     if (token !== TSUtils.navToken()) return;
     try {
       const st = await API.musicTsStatus();
       const box = $('ts-status');
-      if (st.error) { box.textContent = '连接异常：' + st.error; return; }
-      const np = st.nowPlaying ? `${st.nowPlaying.title || ''}${st.nowPlaying.artist ? ' - ' + st.nowPlaying.artist : ''}` : '';
-      let txt = (st.connected ? '已连接频道（' + st.status + '）' : '未连接频道');
-      if (st.clid != null) txt += '　clid: ' + st.clid;
-      if (np) txt += '　正在播放：' + np;
-      box.textContent = txt;
+      if (st.error && !(st.channels || []).length) { box.textContent = '连接异常：' + st.error; return; }
+      const lines = [];
+      const chs = st.channels || [];
+      if (!chs.length) lines.push('未配置部署频道（请在上方添加频道后点「生成机器人 / 重建连接」）');
+      for (const ch of chs) {
+        const stateTxt = ch.connected ? (ch.status === 'playing' ? '推流中' : ch.status) : (ch.status || '未部署');
+        let t = (ch.connected ? '🟢' : '🔴') + ' ' + ch.channel + ' — ' + (ch.nickname || '') + '（' + stateTxt + '）';
+        if (ch.error) t += ' ' + ch.error;
+        lines.push(t);
+      }
+      const np = st.nowPlaying;
+      if (np && np.title) lines.push('♪ 正在播放：' + (np.title || '') + (np.artist ? ' - ' + np.artist : ''));
+      box.innerHTML = lines.map((l) => `<div>${esc(l)}</div>`).join('');
     } catch (e) { /* 忽略 */ }
   }
   $('btn-ts-link').onclick = async () => {
     try {
-      const ch = $('ts-channel').value.trim();
       const key = $('ts-key').value.trim();
-      if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
+      if (!deployChannels.length) { TSUtils.toast('请先在上方添加部署频道', 'error'); return; }
       if (!key) { TSUtils.toast('请先填写 TS API Key', 'error'); return; }
-      TSUtils.toast('正在生成/重建机器人并连接 TeamSpeak…', 'success');
-      // 保存频道、昵称与 Key，再自动建连（后端异步执行，最长可能 25s+，避免代理超时）
-      await API.musicTsSaveConfig({ ts6mgrChannel: ch, ts6mgrBotNickname: $('ts-bot-nickname').value.trim() || '点歌机器人', tsApiKey: key });
+      TSUtils.toast('正在为 ' + deployChannels.length + ' 个频道部署/重建机器人…', 'success');
+      // 保存频道列表、昵称与 Key，再自动建连（后端异步执行，多频道耗时更长，避免代理超时）
+      await API.musicTsSaveConfig({ ts6mgrChannels: deployChannels.slice(), ts6mgrBotNickname: $('ts-bot-nickname').value.trim() || '点歌机器人', tsApiKey: key });
       await API.musicTsLink();
-      TSUtils.toast('已发起连接，请稍后用「刷新状态」查看结果', 'success');
+      TSUtils.toast('已发起部署，请稍后用「刷新状态」查看各频道结果', 'success');
       setTimeout(refreshTsStatus, 8000);
     } catch (e) { TSUtils.toast('生成失败：' + e.message, 'error'); }
   };
   $('btn-ts-unlink').onclick = async () => {
-    try { await API.musicTsUnlink(); TSUtils.toast('已断开推流', 'success'); refreshTsStatus(); }
+    try { await API.musicTsUnlink(); TSUtils.toast('已停止所有频道推流', 'success'); refreshTsStatus(); }
     catch (e) { TSUtils.toast('断开失败：' + e.message, 'error'); }
-  };
-  $('btn-ts-switch').onclick = async () => {
-    const ch = $('ts-channel').value.trim();
-    if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
-    try {
-      TSUtils.toast('正在切换频道…', 'success');
-      await API.musicTsSwitchChannel(ch);
-      TSUtils.toast('已切换到频道：' + ch, 'success');
-      refreshTsStatus();
-    } catch (e) { TSUtils.toast('切换失败：' + e.message, 'error'); }
   };
   $('btn-bot-refresh').onclick = async () => {
     try { await refreshTsStatus(); TSUtils.toast('已刷新机器人状态', 'success'); }
     catch (e) { TSUtils.toast('刷新失败：' + e.message, 'error'); }
   };
   $('btn-bot-delete').onclick = async () => {
-    if (!confirm('确定要彻底删除点歌机器人吗？\n（ts6-manager 中的机器人会被移除，本地歌单/队列不受影响；之后可用「重新连接/重建」恢复）')) return;
+    if (!confirm('确定要删除所有部署的点歌机器人吗？\n（每个部署频道的机器人都会被移除，本地歌单/队列不受影响；之后可点「生成机器人 / 重建连接」按当前频道配置恢复）')) return;
     try {
       const r = await API.musicTsDeleteBot();
-      TSUtils.toast(r.deleted ? '已删除机器人' : '未找到可删除的机器人', 'success');
+      TSUtils.toast(r.deleted ? '已删除 ' + (r.count || '') + ' 个机器人' : '未找到可删除的机器人', 'success');
       refreshTsStatus();
     } catch (e) { TSUtils.toast('删除失败：' + e.message, 'error'); }
   };
@@ -646,6 +691,9 @@ TSPages.music = async function () {
       const cfg = await API.musicTsConfig();
       $('ts-key').value = cfg.tsApiKey || '';
       $('ts-bot-nickname').value = cfg.ts6mgrBotNickname || '点歌机器人';
+      deployChannels = Array.isArray(cfg.ts6mgrChannels) && cfg.ts6mgrChannels.length
+        ? cfg.ts6mgrChannels.slice()
+        : (cfg.ts6mgrChannel ? [cfg.ts6mgrChannel] : []);
       $('ts-chat-on').checked = cfg.tsChatEnabled !== false;
       refreshChatState();
       const cmds = cfg.chatCommands || {};
@@ -662,37 +710,21 @@ TSPages.music = async function () {
       $('ts-audio-channels').value = String(cfg.audioChannels || 2);
       if (!cfg.tsApiKey) {
         sel.innerHTML = '<option value="">（请先填写 TS API Key 后点 ↻ 刷新）</option>';
+        renderChannelList();
         return;
       }
-      const channels = await API.musicTsChannels();
-      const saved = cfg.ts6mgrChannel || '';
-      sel.innerHTML = '';
-      if (!channels.length) {
-        sel.innerHTML = '<option value="">（无频道，请先在 TS 创建）</option>';
-        return;
-      }
-      channels.forEach((c) => {
-        const o = document.createElement('option');
-        o.value = c.path || c.name;
-        o.textContent = c.path || c.name;
-        if ((c.path || c.name) === saved) o.selected = true;
-        sel.appendChild(o);
-      });
-      if (saved && !channels.some((c) => (c.path || c.name) === saved)) {
-        const o = document.createElement('option');
-        o.value = saved; o.textContent = saved + '（当前）'; o.selected = true;
-        sel.appendChild(o);
-      }
+      tsChannelsAvail = await API.musicTsChannels();
+      renderChannelList();
     } catch (e) {
       sel.innerHTML = '<option value="">（加载失败：' + e.message + '）</option>';
+      renderChannelList();
     }
   }
   // ↻ 先保存当前填写的 Key，再刷新频道列表
   $('btn-ts-refresh').onclick = async () => {
     const key = $('ts-key').value.trim();
-    const ch = $('ts-channel').value.trim();
     if (key) {
-      try { await API.musicTsSaveConfig({ tsApiKey: key, ts6mgrChannel: ch }); } catch (e) { /* 忽略 */ }
+      try { await API.musicTsSaveConfig({ tsApiKey: key, ts6mgrChannels: deployChannels.slice() }); } catch (e) { /* 忽略 */ }
     }
     loadTsChannels();
   };
@@ -716,13 +748,15 @@ TSPages.music = async function () {
     if (token !== TSUtils.navToken()) return;
     try {
       const s = await API.musicTsChatStatus();
-      const map = {
-        listening: '监听中：在频道发送 !点歌 <ID|链接> 即可',
-        connecting: '连接 TS 查询…',
-        error: '异常（自动重试中，检查密码/白名单）',
-        stopped: '未启用',
-      };
-      $('ts-chat-state').textContent = map[s.state] || (s.enabled ? '待机' : '未启用');
+      const el = $('ts-chat-state');
+      const label = { listening: '监听中', connecting: '连接中', error: '异常（自动重试中）', stopped: '停止' };
+      if (s.sessions && s.sessions.length) {
+        el.textContent = s.sessions
+          .map((x) => (x.channel.split('/').pop()) + '：' + (label[x.state] || x.state) + (x.nick ? '（' + x.nick + '）' : ''))
+          .join('　');
+      } else {
+        el.textContent = label[s.state] || (s.enabled ? '待机（未配置部署频道）' : '未启用');
+      }
     } catch (e) { /* 服务不可用 */ }
   }
   $('btn-ts-chat-save').onclick = async () => {
@@ -784,7 +818,6 @@ TSPages.music = async function () {
     { cmd: '!队列', alias: '!列表 · !q · !playlist · !待播', ex: '!队列 2', desc: '查看播放队列（每页10首，可翻页）' },
     { cmd: '!循环', alias: '!循环模式 · !loop · !cycle', ex: '!循环 列表', desc: '设置循环：列表 / 单曲 / 随机 / 关' },
     { cmd: '!状态', alias: '!now · !当前 · !playing · !正在播放', ex: '!状态', desc: '查看当前播放与队列' },
-    { cmd: '!切频道', alias: '!切换频道 · !switchchannel · !switch', ex: '!切频道 点歌专区', desc: '把点歌机器人切换到指定频道' },
   ];
   function showChatCmdHelp() {
     const overlay = document.getElementById('modal-overlay');
@@ -884,11 +917,13 @@ TSPages.music = async function () {
   await refreshQueue();
   startTick();
   pollTimer = TSUtils.setInterval(() => { refreshQueue(); pollPlayer(); }, 5000);
+  statusTimer = TSUtils.setInterval(() => { refreshTsStatus(); refreshChatState(); }, 15000); // TS/助手状态刷新频率低于队列（走 ts6-manager）
 
   // 页面卸载时清理所有定时器和未关闭的弹窗，避免快速切页写入已销毁 DOM / 卡死
   TSUtils.registerCleanup(() => {
     if (playerTick) { clearInterval(playerTick); playerTick = null; }
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
     if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
     const ov = document.getElementById('modal-overlay');
     if (ov) ov.hidden = true;

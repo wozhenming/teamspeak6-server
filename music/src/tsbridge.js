@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * 与点歌机器人语音引擎 ts6-manager 对接：
- * - 登录拿 JWT
- * - 取/建一个音乐机器人（music bot），并配置加入的频道
- * - 创建一个电台（radio station），URL 指向本服务的 /api/stream 连续流
- * - 让该 bot 播放这个电台，从而把点歌队列推流进 TeamSpeak 频道
+ * 与点歌机器人语音引擎 ts6-manager 对接（每频道固定部署模式）：
+ * - 每个配置的频道固定部署一个点歌机器人（一个频道一个，绝不跨频道移动）
+ * - 所有机器人播放同一路电台流（本服务 /api/stream，点歌队列全局共享）
+ * - 机器人命名：单频道用配置昵称原名；多频道自动加「·频道名」后缀区分
+ * - 频道无人自动暂停：所有已部署频道都无人时才暂停；任一频道有人即恢复
  *
  * 仅在配置了 TS6MGR_URL / TS6MGR_USER / TS6MGR_PASS 时启用。
  */
@@ -35,7 +35,6 @@ function cfg() {
     url: (config.ts6mgrUrl || '').replace(/\/$/, ''),
     user: config.ts6mgrUser || '',
     pass: config.ts6mgrPass || '',
-    botId: config.ts6mgrBotId ? parseInt(config.ts6mgrBotId, 10) : null,
     channel: config.ts6mgrChannel || '',
     streamUrl: (config.streamPublicUrl || 'http://music:3200/api/stream'),
     streamTokenEnabled: config.streamTokenEnabled !== false,
@@ -146,7 +145,8 @@ async function ensureServer(token, c) {
 async function getBots(token) {
   const { status, json } = await authFetch('GET', '/api/music-bots', token);
   if (status !== 200) throw new Error('获取音乐机器人列表失败 (HTTP ' + status + ')');
-  return (json.data && json.data.bots) || json.data || json || [];
+  const list = (json.data && json.data.bots) || json.data || json || [];
+  return Array.isArray(list) ? list : [];
 }
 
 // 提取 ts6-manager 返回的详细错误（含 TeamSpeak 原始 status 信息），便于排查
@@ -182,7 +182,7 @@ async function getVirtualServerId(token, configId) {
   return parseInt(sid, 10) || 1;
 }
 
-// 列出 TS 服务器现有频道（供面板下拉选择）。自动确保 TS 连接已建立。
+// 列出 TS 服务器现有频道（供面板选择要部署的频道）。自动确保 TS 连接已建立。
 async function getChannels(token, configId) {
   const sid = await getVirtualServerId(token, configId);
   const { status, json } = await authFetch('GET', '/api/servers/' + configId + '/vs/' + sid + '/channels', token);
@@ -212,8 +212,6 @@ async function getChannels(token, configId) {
       path = cur.name + '/' + path;
       depth++;
     }
-    // 保留客户端计数：getChannelClientCount / 频道无人自动暂停依赖 ch.clients。
-    // 此前丢失该字段导致 maybeAutoPauseEmpty 读到的永远是 undefined（=null），自动暂停/恢复失效。
     return { id: c.id, name: c.name, path, clients: c.clients, clientsRaw: (Array.isArray(c.clientsRaw) ? c.clientsRaw : null) };
   });
 }
@@ -248,65 +246,109 @@ async function ensureStation(token, serverConfigId) {
   return st.id;
 }
 
-// 找到我们的点歌机器人：优先用配置的 botId，其次按名字匹配（避免重复创建出多个机器人）
-// 匹配名取配置的机器人昵称 ts6mgrBotNickname（默认“点歌机器人”），支持面板改名后仍能识别。
+// ---------- 频道列表与命名（一频道一机器人一点歌助手，固定绑定） ----------
+function configChannels() {
+  const list = Array.isArray(config.ts6mgrChannels) ? config.ts6mgrChannels : [];
+  const out = [];
+  for (const c of list) {
+    const t = String(c || '').trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+function leafOf(path) {
+  const leaf = String(path || '').split('/').pop().trim();
+  return leaf || String(path || '');
+}
+
+// 为一组频道分配唯一显示名：单频道用原名；多频道加「·频道名」后缀；
+// 频道叶子名重复时退回完整路径（/ 换成 ·）保证不冲突。
+function assignNames(channels, base) {
+  const chs = Array.isArray(channels) ? channels : [];
+  const leaves = chs.map(leafOf);
+  const dup = new Set(leaves.filter((l, i) => leaves.indexOf(l) !== i));
+  const names = {};
+  chs.forEach((ch, i) => {
+    names[ch] = chs.length === 1
+      ? base
+      : (dup.has(leaves[i]) ? base + '·' + String(ch).replace(/\//g, '·') : base + '·' + leaves[i]);
+  });
+  return names;
+}
+
 function botNickname() {
   return (config.ts6mgrBotNickname || '点歌机器人').trim();
 }
-function pickBot(c, bots) {
-  const nick = botNickname();
-  if (c.botId) {
-    const byId = bots.find((b) => b && b.id === c.botId);
-    if (byId) return byId;
-  }
-  // 精确匹配
-  const byExact = bots.find((b) => b && (b.name === nick || b.nickname === nick));
-  if (byExact) return byExact;
-  // 模糊兜底：ts6-manager 可能把名字放在别的字段或带前后缀（如 “点歌机器人#1”）
-  return bots.find((b) =>
-    b && (((b.name || '').includes(nick)) || ((b.nickname || '').includes(nick)))
-  ) || null;
+
+// 某频道对应的机器人名（含后缀规则）
+function botNameFor(channel) {
+  const names = assignNames(configChannels(), botNickname());
+  return names[channel] || botNickname();
 }
 
-async function ensureBot(token, serverConfigId) {
-  const c = cfg();
-  let bots = [];
-  try { bots = await getBots(token); } catch (e) { bots = []; }
-  const existing = pickBot(c, bots);
+// ---------- 机器人固定绑定（频道 → botId） ----------
+function botBindings() {
+  return (config.ts6mgrChannelBots && typeof config.ts6mgrChannelBots === 'object') ? config.ts6mgrChannelBots : {};
+}
+function saveBotBinding(channel, botId) {
+  const map = Object.assign({}, botBindings());
+  if (botId != null && botId !== '') map[channel] = String(botId);
+  else delete map[channel];
+  config.saveTsBridge({ ts6mgrChannelBots: map });
+}
+
+// 确保某频道有自己的机器人：按绑定 botId → 按名字查找 → 不存在则创建（defaultChannel 固定为本频道）
+async function ensureBotForChannel(token, serverConfigId, channel) {
+  const bots = await getBots(token);
+  const name = botNameFor(channel);
+  const bound = botBindings()[channel];
+  let existing = null;
+  if (bound != null) existing = bots.find((b) => b && String(b.id) === String(bound));
+  if (!existing) existing = bots.find((b) => b && (b.name === name || b.nickname === name));
   if (existing) {
-    // 尽力更新加入的频道（失败不阻断）
-    if (c.channel) {
-      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: c.channel }); } catch (e) { /* 忽略 */ }
-    }
-    // 机器人改名支持：若配置昵称与 ts6-manager 里机器人的 name/nickname 不一致，则更新之。
-    const want = botNickname();
+    // 固定绑定：defaultChannel 指向本频道（幂等 PUT，仅在指错时才会真正“归位”，不构成运行期移动）
+    try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { defaultChannel: channel, channelPassword: config.ts6mgrChannelPassword || '' }); } catch (e) { /* 忽略 */ }
+    // 配置昵称变化时同步机器人名（含 ·频道名 后缀）
     const have = (existing.name || existing.nickname || '').trim();
-    if (want && have !== want) {
-      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { name: want, nickname: want }); console.log('[tsbridge] 已按配置把机器人改名为 ' + want); } catch (e) { /* 忽略 */ }
+    if (name && have !== name) {
+      try { await authFetch('PUT', '/api/music-bots/' + existing.id, token, { name, nickname: name }); } catch (e) { /* 忽略 */ }
     }
-    try { config.saveTsBridge({ ts6mgrBotId: String(existing.id) }); } catch (e) { /* 忽略 */ }
+    saveBotBinding(channel, existing.id);
     return existing.id;
   }
-  const name = botNickname();
   const create = await authFetch('POST', '/api/music-bots', token, {
     name,
     serverConfigId,
     nickname: name,
-    defaultChannel: c.channel,
+    defaultChannel: channel,
     channelPassword: config.ts6mgrChannelPassword || '',
     volume: 50,
     autoStart: false,
   });
   if (create.status !== 201 && create.status !== 200) {
-    throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败'));
+    throw new Error(apiErrText(create.status, create.json, '创建音乐机器人失败（' + channel + '）'));
   }
   const bot = (create.json && (create.json.data || create.json));
-  // 立即持久化 botId：即使后续 play-radio 失败，下次也不会重复新建机器人
-  try { config.saveTsBridge({ ts6mgrBotId: String(bot.id), ts6mgrChannel: c.channel }); } catch (e) { /* 忽略 */ }
+  saveBotBinding(channel, bot.id);
+  console.log('[tsbridge] 已为频道「' + channel + '」创建点歌机器人（' + name + '）');
   return bot.id;
 }
 
-// 等待 bot 真正连上 TS（start 是异步的，play-radio 要求已 connected）
+// 找出“我们的”机器人：已绑定频道的 + 按各频道名匹配的（供断开/删除/恢复电台用）
+function ourBots(bots) {
+  const bindings = botBindings();
+  const boundIds = new Set(Object.values(bindings).map(String));
+  const names = new Set(configChannels().map((ch) => botNameFor(ch)));
+  const legacyId = config.ts6mgrBotId ? String(config.ts6mgrBotId) : null;
+  return (Array.isArray(bots) ? bots : []).filter((b) => {
+    if (!b) return false;
+    if (legacyId && String(b.id) === legacyId) return true;
+    if (boundIds.has(String(b.id))) return true;
+    return (b.name != null && names.has(b.name)) || (b.nickname != null && names.has(b.nickname));
+  });
+}
+
 // 从 ts6-manager 的 bot 响应里取出状态字符串（兼容 data.bot.status / data.status / 嵌套等结构）
 function extractBotStatus(json) {
   if (!json) return null;
@@ -336,6 +378,14 @@ function extractBotField(json, names) {
   return found;
 }
 
+// 从 ts6-manager 的 bot 对象里取出它在 TS 里的 client id（字段名在 TS3/TS6 间可能不同）
+function b_clid(b) {
+  if (!b) return null;
+  return b.clid != null ? b.clid
+    : (b.clientId != null ? b.clientId
+      : (b.client_id != null ? b.client_id : null));
+}
+
 async function waitBotConnected(token, botId, tries = 30) {
   let dumped = false;
   for (let i = 0; i < tries; i++) {
@@ -347,14 +397,6 @@ async function waitBotConnected(token, botId, tries = 30) {
         if (!dumped && (s === 'error' || s === 'stopped')) {
           dumped = true;
           console.log('[tsbridge] waitBotConnected: 首次失败，bot 详情=' + JSON.stringify(json));
-          // 再抓 serverConfig（TS 连接）详情，错误的根因通常在这一层
-          try {
-            const scId = json && (json.serverConfigId || (json.serverConfig && json.serverConfig.id));
-            if (scId) {
-              const sc = await authFetch('GET', '/api/servers/' + scId, token);
-              console.log('[tsbridge] serverConfig(' + scId + ') 详情=' + JSON.stringify(sc.json));
-            }
-          } catch (e2) { console.log('[tsbridge] 读取 serverConfig 失败: ' + e2.message); }
         } else if (i % 3 === 0 || s) {
           console.log('[tsbridge] waitBotConnected: 当前 status=' + s + (detail ? ' 详情=' + detail : '') + ' (尝试 ' + (i + 1) + '/' + tries + ')');
         }
@@ -369,90 +411,94 @@ async function waitBotConnected(token, botId, tries = 30) {
   return false;
 }
 
-// ---------- 防重复连接（并发锁）+ 自动重连看门狗 ----------
+// ---------- 防重复连接（并发锁）+ 自动修复看门狗 ----------
 let linking = null;          // 串行化 link()，避免并发点击重复建 bot
 let desiredLinked = false;   // 用户意图：应保持连接（用于看门狗判断是否需自愈）
 let autoPausedByEmpty = false; // 因“频道无人”而自动暂停（用于有人进入时自动恢复）
 let watchdogTimer = null;
-let switching = null;        // 串行化 switchChannel，避免来回快速切换并发 restart 把机器人搞丢
-let switchPendingChannel = null; // 以最后一次切换请求为准（最新胜利）
+const repairing = new Set(); // 正在修复的频道（避免 15s tick 重叠修复）
 
 // ---------- 频道在线人数统计（供“频道无人自动暂停”使用） ----------
-// 注意：ServerQuery 客户端（serveradmin / 点歌助手）会 clientmove 进机器人所在频道并常驻，
-// 但它们收不到语音、不是“人”。此前用 channellist 的 total_clients 判断，计数永远 ≥2
-// （机器人+点歌助手），导致“频道无人自动暂停/有人自动恢复”从未生效。
+// 注意：ServerQuery 客户端（serveradmin / 点歌助手）会驻留在频道里，
+// 但它们收不到语音、不是“人”。按 clients 端点的 client_type 只统计真实语音用户。
 const clidOfClient = (cl) => cl.clid != null ? cl.clid : (cl.client_id != null ? cl.client_id : (cl.clientId != null ? cl.clientId : null));
 const cidOfClient = (cl) => cl.cid != null ? cl.cid : (cl.channel_id != null ? cl.channel_id : (cl.channelId != null ? cl.channelId : null));
 const nickOfClient = (cl) => cl.nickname || cl.client_nickname || cl.name || '';
+
+// 机器人在 TS 里的 clid 缓存（频道 → clid）：由 status() 从 bot 记录刷新，防同名冒充干扰计数
+const botClidByChannel = new Map();
 
 function isQueryClient(cl) {
   const t = cl.client_type != null ? cl.client_type
     : (cl.clientType != null ? cl.clientType : (cl.type != null ? cl.type : null));
   if (t != null) return String(t) === '1'; // TS ServerQuery：client_type=1（语音客户端为 0）
-  // 个别实现不回传 client_type 时按已知查询端昵称兜底（点歌助手可能带随机数字后缀）
+  // 个别实现不回传 client_type 时按已知查询端昵称兜底（点歌助手可能带后缀）
   const n = String(nickOfClient(cl) || '');
-  return n === 'serveradmin' || /^点歌助手/.test(n);
+  return n === 'serveradmin' || n.startsWith('serveradmin ') || /^点歌助手/.test(n);
 }
 
-// 从 ts6-manager 的 clients 端点统计“机器人所在频道的真实语音用户数”
-// （排除机器人自身与所有 ServerQuery 客户端）。返回数字；无法判断返回 null。
-async function countRealVoiceUsers() {
-  const c = cfg();
-  try {
-    const token = await getToken();
-    const serverConfigId = await ensureServer(token, c);
-    const sid = await getVirtualServerId(token, serverConfigId);
-    const r = await authFetch('GET', '/api/servers/' + serverConfigId + '/vs/' + sid + '/clients', token);
-    if (r.status !== 200) return null;
-    const j = r.json;
-    const clients = Array.isArray(j) ? j
-      : (j && Array.isArray(j.data)) ? j.data
-        : (j && j.data && Array.isArray(j.data.clients)) ? j.data.clients
-          : (j && Array.isArray(j.clients)) ? j.clients : [];
-    if (!clients.length) return null; // 连客户端列表都没有，无从判断
-    // 先定位机器人所在频道：clid 缓存优先（不会被同名用户冒充），昵称兜底
-    let bot = null;
-    if (botTsClid != null) bot = clients.find((cl) => String(clidOfClient(cl)) === String(botTsClid));
-    if (!bot) {
-      const bn = botNickname();
-      bot = clients.find((cl) => nickOfClient(cl) === bn)
-        || clients.find((cl) => String(nickOfClient(cl) || '').includes(bn));
-    }
-    if (!bot || cidOfClient(bot) == null) return null; // 机器人不在频道里，维持现状
+// 在客户端列表里定位某频道的机器人（clid 缓存优先，昵称兜底）
+function findChannelBot(clients, channel) {
+  const wantClid = botClidByChannel.get(channel);
+  if (wantClid != null) {
+    const byClid = clients.find((cl) => String(clidOfClient(cl)) === String(wantClid));
+    if (byClid) return byClid;
+  }
+  const name = botNameFor(channel);
+  return clients.find((cl) => nickOfClient(cl) === name)
+    || clients.find((cl) => String(nickOfClient(cl) || '').includes(name))
+    || null;
+}
+
+// 统计每个频道的真实语音用户数（排除机器人自身与 ServerQuery 客户端）。
+// 机器人不在列表/定位不到频道的记 null（无法判断）。
+function countRealVoiceUsersByChannel(clients, channels) {
+  const out = {};
+  for (const channel of channels) {
+    const bot = findChannelBot(clients, channel);
+    if (!bot || cidOfClient(bot) == null) { out[channel] = null; continue; }
     const botCid = String(cidOfClient(bot));
     const botClid = clidOfClient(bot) != null ? String(clidOfClient(bot)) : null;
-    return clients.filter((cl) =>
+    out[channel] = clients.filter((cl) =>
       String(cidOfClient(cl)) === botCid
       && (botClid == null || String(clidOfClient(cl)) !== botClid)
       && !isQueryClient(cl)
     ).length;
-  } catch (e) {
-    return null;
   }
+  return out;
 }
 
-// 取机器人所在频道的“真实语音用户数”（不含机器人自身与 ServerQuery 客户端）。
-// 优先走 clients 端点精确统计；不可用时退回 channellist 计数（total_clients 含机器人，减 1 近似，
-// 该兜底无法剔除 Query 客户端，仅作降级）。返回数字；无法判断时返回 null，调用方应忽略。
+async function listAllClients(token, serverConfigId) {
+  const sid = await getVirtualServerId(token, serverConfigId);
+  const r = await authFetch('GET', '/api/servers/' + serverConfigId + '/vs/' + sid + '/clients', token);
+  if (r.status !== 200) return null;
+  const j = r.json;
+  const clients = Array.isArray(j) ? j
+    : (j && Array.isArray(j.data)) ? j.data
+      : (j && j.data && Array.isArray(j.data.clients)) ? j.data.clients
+        : (j && Array.isArray(j.clients)) ? j.clients : [];
+  return clients;
+}
+
+// 所有已部署频道的真实语音用户总数。返回数字；完全无法判断时返回 null，调用方应忽略。
 async function getChannelClientCount() {
-  const users = await countRealVoiceUsers();
-  if (users != null) return users;
-  const c = cfg();
-  const path = (config.ts6mgrChannel || c.channel || '').trim();
-  if (!path) return null;
+  const channels = configChannels();
+  if (!channels.length) return null;
   try {
     const token = await getToken();
-    const serverConfigId = await ensureServer(token, c);
-    const channels = await getChannels(token, serverConfigId);
-    const ch = channels.find((x) => x.path === path) || channels.find((x) => x.name === path);
-    if (!ch || ch.clients == null) return null;
-    return Math.max(0, ch.clients - 1);
+    const serverConfigId = await ensureServer(token, cfg());
+    const clients = await listAllClients(token, serverConfigId);
+    if (!clients || !clients.length) return null;
+    const per = countRealVoiceUsersByChannel(clients, channels);
+    const vals = Object.values(per);
+    if (vals.every((v) => v == null)) return null; // 一个频道都定位不到机器人
+    return vals.reduce((a, v) => a + (v || 0), 0);
   } catch (e) {
     return null;
   }
 }
 
-// 频道内没有真实语音用户时自动暂停；有人进入且此前是“因无人暂停”的，则自动恢复。
+// 所有已部署频道都无人时自动暂停；任一频道有人且此前是“因无人暂停”的，则自动恢复。
 async function maybeAutoPauseEmpty() {
   if (config.autoPauseEmpty === false) return;
   const count = await getChannelClientCount();
@@ -462,10 +508,9 @@ async function maybeAutoPauseEmpty() {
     if (playing && !autoPausedByEmpty) {
       player.pause();
       autoPausedByEmpty = true;
-      console.log('[tsbridge] 频道内无人，自动暂停播放');
+      console.log('[tsbridge] 所有部署频道均无人，自动暂停播放');
     }
   } else {
-    // 有人进入频道
     if (autoPausedByEmpty && !playing) {
       player.resume();
       resumeRadio().catch(() => {}); // 重新向 ts6-manager 下达 play-radio 保活
@@ -475,21 +520,41 @@ async function maybeAutoPauseEmpty() {
   }
 }
 
-// 周期性检查机器人在线状态：ts6-manager 在电台空（Queue empty）等情况会停止播放/断开，
-// 我们的 /api/stream 在队列空时持续输出静音，所以只需重新下达 play-radio 即可让它重新拉流、保持在线。
+// 周期性检查各频道机器人在线状态并修复 + 执行无人自动暂停。
+// ts6-manager 在电台空等情况会停止播放/断开；/api/stream 始终有静音保底，
+// 重新下达 start + play-radio 即可让它重新拉流、保持在线。
 async function watchdogTick() {
   if (!desiredLinked) return;
   try {
     const st = await status();
     if (!st || !st.enabled) return;
-    if (st.connected) {
-      // 仍在线：检查频道是否有人，无人则自动暂停
-      await maybeAutoPauseEmpty();
-      return;
+    for (const ch of (st.channels || [])) {
+      if (!ch.connected && ch.botId && !repairing.has(ch.channel)) {
+        repairing.add(ch.channel);
+        repairChannel(ch.channel)
+          .catch((e) => console.log('[tsbridge] 修复频道「' + ch.channel + '」失败: ' + (e && e.message)))
+          .finally(() => repairing.delete(ch.channel));
+      }
     }
-    console.log('[tsbridge] 检测到点歌机器人已断开/停止，自动重连恢复…');
-    try { await link(); } catch (e) { console.log('[tsbridge] 自动重连失败: ' + (e && e.message)); }
+    await maybeAutoPauseEmpty();
   } catch (e) { /* 忽略本轮 */ }
+}
+
+// 修复单个频道的机器人：start → 等连接 → 重新下达 play-radio
+async function repairChannel(channel) {
+  const botId = botBindings()[channel];
+  if (!botId) return;
+  console.log('[tsbridge] 检测到频道「' + channel + '」的机器人离线，自动修复…');
+  const token = await getToken();
+  const c = cfg();
+  const serverConfigId = await ensureServer(token, c);
+  const stationId = await ensureStation(token, serverConfigId);
+  await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+  const ok = await waitBotConnected(token, botId, 20);
+  if (!ok) throw new Error('机器人重连超时');
+  const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
+  if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+  console.log('[tsbridge] 频道「' + channel + '」的机器人已恢复在线');
 }
 
 function startWatchdog() {
@@ -502,36 +567,42 @@ function stopWatchdog() {
   desiredLinked = false;
 }
 
+// 按频道逐一部署：确保机器人 → 启动 → 等连接 → 播放电台（全部失败才抛错）
 async function linkImpl() {
-  // 生成/恢复机器人前，确保电台流对外地址已正确解析（公网、非内网）。
-  // 启动时的自动探测可能偶发失败，这里再试一次；仍失败会抛出清晰错误而非被 ts6-manager 拒掉。
-  console.log('[tsbridge] link: 步骤1/6 确保电台流公网地址…');
+  console.log('[tsbridge] link: 步骤1/5 确保电台流公网地址…');
   await ensureStreamPublicUrl();
   const c = cfg();
-  if (!c.channel) {
-    throw new Error('未配置机器人要加入的频道：请先在面板选择一个频道并保存，再点「重新连接/重建」');
+  const channels = configChannels();
+  if (!channels.length) {
+    throw new Error('未配置任何部署频道：请先在面板「TeamSpeak 推流 → 部署频道」添加频道并保存，再点「生成机器人 / 重建连接」');
   }
-  console.log('[tsbridge] link: 步骤2/6 获取 ts6-manager token（' + c.url + '）');
+  console.log('[tsbridge] link: 步骤2/5 获取 ts6-manager token（' + c.url + '）');
   const token = await getToken();
-  console.log('[tsbridge] link: 步骤3/6 确保 TS 连接(serverConfig)…');
+  console.log('[tsbridge] link: 步骤3/5 确保 TS 连接(serverConfig)…');
   const serverConfigId = await ensureServer(token, c);
-  console.log('[tsbridge] link: 步骤4/6 确保音乐机器人（serverConfig=' + serverConfigId + '）');
-  const botId = await ensureBot(token, serverConfigId);
+  console.log('[tsbridge] link: 步骤4/5 确保电台(station)…');
   const stationId = await ensureStation(token, serverConfigId);
-
-  console.log('[tsbridge] link: 步骤5/6 启动机器人 botId=' + botId);
-  await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
-  await refreshBotClid(token); // 记录机器人在 TS 里的 client id，供查询端定位
-  // 等 bot 连接上频道后再播放电台（避免 “Bot is not connected”）
-  console.log('[tsbridge] link: 步骤6/6 等待机器人连接频道…');
-  await waitBotConnected(token, botId);
-  const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
-  if (play.status !== 200) {
-    throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+  console.log('[tsbridge] link: 步骤5/5 按频道部署机器人（共 ' + channels.length + ' 个）…');
+  const results = [];
+  for (const channel of channels) {
+    try {
+      const botId = await ensureBotForChannel(token, serverConfigId, channel);
+      await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
+      const ok = await waitBotConnected(token, botId);
+      if (!ok) throw new Error('机器人连接频道超时');
+      const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
+      if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+      results.push({ channel, ok: true, botId });
+      console.log('[tsbridge] 频道「' + channel + '」的机器人已上线并开始推流');
+    } catch (e) {
+      results.push({ channel, ok: false, error: (e && e.message) || String(e) });
+    }
   }
-  // 持久化 botId，避免重复连接时反复新建机器人
-  try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: c.channel }); } catch (e) { /* 忽略 */ }
-  return { ok: true, botId, stationId, serverConfigId };
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length === results.length) {
+    throw new Error('全部频道部署失败：' + failed.map((f) => f.channel + '（' + f.error + '）').join('；'));
+  }
+  return { ok: true, results, stationId, serverConfigId };
 }
 
 async function link() {
@@ -549,305 +620,135 @@ async function link() {
   return linking;
 }
 
+// 断开：停止所有我们部署的机器人的播放（机器人留在各自频道不动）
 async function unlink() {
   stopWatchdog();
-  const c = cfg();
   const token = await getToken();
   const bots = await getBots(token);
-  const bot = pickBot(c, bots) || bots[0];
-  if (!bot) throw new Error('未找到音乐机器人');
-  await authFetch('POST', '/api/music-bots/' + bot.id + '/stop-playback', token);
-  return { ok: true, botId: bot.id };
+  const targets = ourBots(bots);
+  let stopped = 0;
+  for (const b of targets) {
+    try {
+      await authFetch('POST', '/api/music-bots/' + b.id + '/stop-playback', token);
+      stopped++;
+    } catch (e) { /* 继续其它机器人 */ }
+  }
+  return { ok: true, stopped };
 }
 
-// 彻底删除 ts6-manager 里的点歌机器人（停止看门狗并清空本地记录的 botId）。
-// 之后若想恢复，调用 link() 会以当前配置重新创建机器人。
+// 彻底删除我们部署的所有机器人（只删绑定的/按名字匹配的，不动用户手建的其他机器人）。
+// 之后若想恢复，调用 link() 会按当前频道配置重新创建。
 async function deleteBot() {
   stopWatchdog();
   desiredLinked = false;
-  const c = cfg();
   let token;
   try { token = await getToken(); } catch (e) { token = null; }
-  let deleted = false;
-  let statusCode = null;
+  let deleted = 0;
   if (token) {
     try {
       const bots = await getBots(token);
-      const bot = pickBot(c, bots);
-      if (bot) {
-        const r = await authFetch('DELETE', '/api/music-bots/' + bot.id, token);
-        statusCode = r.status;
-        deleted = r.status === 200 || r.status === 204;
+      const targets = ourBots(bots);
+      for (const b of targets) {
+        try {
+          const r = await authFetch('DELETE', '/api/music-bots/' + b.id, token);
+          if (r.status === 200 || r.status === 204) deleted++;
+        } catch (e) { /* 继续 */ }
       }
     } catch (e) { /* 忽略 */ }
   }
-  try { config.saveTsBridge({ ts6mgrBotId: '' }); } catch (e) { /* 忽略 */ }
-  botTsClid = null;
-  return { ok: true, deleted, status: statusCode };
+  config.saveTsBridge({ ts6mgrChannelBots: {}, ts6mgrBotId: '' });
+  botClidByChannel.clear();
+  return { ok: true, deleted: deleted > 0, count: deleted };
 }
 
-// 切换机器人所在频道：更新 defaultChannel 后重启机器人进入新频道（保留播放队列/电台流）
-// 注意：必须“完全断开”（stop）再重连，单停播放（stop-playback）不会让 bot 离开旧频道，
-// 那样 start 只是原地恢复，造成“提示切换成功但实际没动”的现象。
-//
-// 来回快速切换会并发触发多个 restart，把机器人状态搞乱甚至“消失”（play-radio 报
-// “Bot is not connected”）。这里用 switching 互斥 + 最新胜利队列串行化，并对每一步做重试。
-function switchChannel(channelPath) {
-  switchPendingChannel = channelPath; // 始终以最后一次请求为准
-  if (switching) return switching;
-  switching = (async () => {
-    try {
-      while (switchPendingChannel != null) {
-        const path = switchPendingChannel;
-        switchPendingChannel = null;
-        await switchChannelInner(path);
-      }
-      return { ok: true };
-    } finally {
-      switching = null;
-      switchPendingChannel = null;
-    }
-  })();
-  return switching;
-}
-
-async function switchChannelInner(path) {
-  const p = (path || '').trim();
-  if (!p) throw new Error('频道不能为空');
-  // 立即持久化新频道，使后续 start/restart 使用它作为 defaultChannel
-  try { config.saveTsBridge({ ts6mgrChannel: p }); } catch (e) { /* 忽略 */ }
-  const token = await getToken();
-  const c = cfg();
-  const serverConfigId = await ensureServer(token, c);
-  const stationId = await ensureStation(token, serverConfigId);
-  let bots = await getBots(token);
-  let bot = pickBot(c, bots) || bots[0];
-  if (!bot) return await link(); // 还没建过机器人：走完整 link
-  const botId = bot.id;
-  await refreshBotClid(token); // 记录机器人在 TS 里的 client id，供查询端定位
-  let lastErr = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-       // 1) 更新目标频道
-      try { await authFetch('PUT', '/api/music-bots/' + botId, token, { defaultChannel: p, channelPassword: config.ts6mgrChannelPassword || '' }); } catch (e) { /* 忽略 */ }
-      // 2) 重启机器人（离开旧频道并以新频道重新加入）
-      const r = await authFetch('POST', '/api/music-bots/' + botId + '/restart', token);
-      if (r.status !== 200) {
-        await authFetch('POST', '/api/music-bots/' + botId + '/stop', token);
-      }
-      // 3) 等真正连上频道（避免 “Bot is not connected”）
-      const ok = await waitBotConnected(token, botId, 25);
-      if (!ok) throw new Error('机器人重连超时（Bot is not connected）');
-      // 4) 恢复电台流（默认频道变了，bot 重启后需要重新下达 play-radio）
-      const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
-      if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
-      try { config.saveTsBridge({ ts6mgrBotId: String(botId), ts6mgrChannel: p }); } catch (e) { /* 忽略 */ }
-      desiredLinked = true;
-      startWatchdog();
-      return { ok: true, botId, stationId, serverConfigId };
-    } catch (e) {
-      lastErr = e;
-      console.log('[tsbridge] 切换频道第 ' + (attempt + 1) + ' 次失败：' + (e && e.message));
-      await new Promise((r) => setTimeout(r, 1500));
-    }
-  }
-  // 兜底：完整重连一次（以新频道重新创建/启动机器人）
-  try { return await link(); } catch (e) { throw lastErr || e; }
-}
-
-// 带 token 失效重试：401 时强制重新登录再试一次
-async function withAuth(fn) {
-  try {
-    return await fn(await getToken());
-  } catch (e) {
-    if (/401/.test(e.message || '')) {
-      invalidateToken();
-      return fn(await getToken());
-    }
-    throw e;
-  }
-}
-
-// 缓存音乐机器人在 TS 里的 client id（clid），供「点歌助手」查询端精准定位机器人所在频道。
-// 优先用 clid 判断机器人，昵称只作兜底（昵称可能带前后缀/特殊符号）。
-let botTsClid = null;
-async function refreshBotClid(token) {
-  try {
-    const t = token || (await getToken());
-    const c = cfg();
-    const bots = await getBots(t);
-    const bot = pickBot(c, bots);
-    if (!bot) return botTsClid;
-    const { status, json } = await authFetch('GET', '/api/music-bots/' + bot.id, t);
-    if (status !== 200) return botTsClid;
-    const b = (json.data && (json.data.bot || json.data)) || json;
-    const cid = b_clid(b);
-    if (cid != null) botTsClid = cid;
-  } catch (e) { /* 忽略 */ }
-  return botTsClid;
-}
-function getBotClid() { return botTsClid; }
-
-// 从 ts6-manager 的 bot 对象里取出它在 TS 里的 client id（字段名在 TS3/TS6 间可能不同）
-function b_clid(b) {
-  if (!b) return null;
-  return b.clid != null ? b.clid
-    : (b.clientId != null ? b.clientId
-      : (b.client_id != null ? b.client_id : null));
-}
-
+// 聚合状态：每个频道的机器人状态一行；connected = 所有已部署频道都在线
 async function status() {
   const c = cfg();
+  const channels = configChannels();
   let token;
-  try { token = await getToken(); } catch (e) { return { enabled: true, connected: false }; }
+  try { token = await getToken(); } catch (e) { return { enabled: true, connected: false, channels: [], error: e.message }; }
   try {
-    const run = (t) => async () => {
-      const bots = await getBots(t);
-      const target = pickBot(c, bots) || bots[0];
-      if (!target) return { enabled: true, connected: false };
-      let bot = target;
-      if (!bot.status) {
-        const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
-        if (status !== 200) return { enabled: true, connected: false };
-        bot = (json.data && json.data.bot) || json.data || json;
+    const bots = await getBots(token);
+    const byId = {};
+    (Array.isArray(bots) ? bots : []).forEach((b) => { if (b && b.id != null) byId[String(b.id)] = b; });
+    const bindings = botBindings();
+    const chs = [];
+    for (const channel of channels) {
+      const bound = bindings[channel] != null ? String(bindings[channel]) : null;
+      let bot = bound != null ? byId[bound] : null;
+      if (!bot) {
+        const name = botNameFor(channel);
+        bot = (Array.isArray(bots) ? bots : []).find((b) => b && (b.name === name || b.nickname === name)) || null;
       }
-      const botStatus = extractBotStatus(bot) || bot.status;
-      const botError = extractBotField(bot, ['error', 'errorMessage', 'message', 'lastError', 'reason', 'description', 'detail']);
-      const clid = b_clid(bot);
-      if (clid != null) botTsClid = clid;
-      return { enabled: true, connected: botStatus === 'connected' || botStatus === 'playing' || botStatus === 'paused', status: botStatus, error: botError || null, nowPlaying: bot.nowPlaying || null, clid: clid };
-    };
-    return await withAuth(run(token));
+      if (bot && !bot.status) {
+        try {
+          const r = await authFetch('GET', '/api/music-bots/' + bot.id, token);
+          if (r.status === 200) bot = (r.json.data && (r.json.data.bot || r.json.data)) || bot;
+        } catch (e) { /* 用列表里的信息兜底 */ }
+      }
+      const s = bot ? (extractBotStatus(bot) || bot.status || null) : null;
+      const error = bot ? extractBotField(bot, ['error', 'errorMessage', 'message', 'lastError', 'reason', 'description', 'detail']) : null;
+      const clid = bot ? b_clid(bot) : null;
+      if (clid != null) botClidByChannel.set(channel, clid);
+      else botClidByChannel.delete(channel);
+      chs.push({
+        channel,
+        botId: bot ? String(bot.id) : bound,
+        nickname: bot ? (bot.nickname || bot.name || botNameFor(channel)) : botNameFor(channel),
+        status: s,
+        connected: s === 'connected' || s === 'playing' || s === 'paused',
+        error: error || null,
+        nowPlaying: bot ? (bot.nowPlaying || null) : null,
+        clid,
+      });
+    }
+    const connected = chs.length > 0 && chs.every((x) => x.connected);
+    const playing = chs.find((x) => x.nowPlaying);
+    const agg = !chs.length ? 'empty'
+      : connected ? 'connected'
+        : chs.some((x) => x.connected) ? 'partial' : 'disconnected';
+    return { enabled: true, connected, status: agg, channels: chs, nowPlaying: playing ? playing.nowPlaying : null };
   } catch (e) {
-    return { enabled: true, connected: false, error: e.message };
+    return { enabled: true, connected: false, channels: [], error: e.message };
   }
 }
 
-// 恢复播放时重新向机器人下达 play-radio（自愈）：暂停后 ts6-manager 机器人可能已放弃
-// 当前电台流连接，仅改本地状态不会让它重新出声；重下达后它会重新拉取 /api/stream。
+// 恢复播放时向所有我们部署的机器人重新下达 play-radio（自愈）：
+// 暂停后机器人可能放弃电台流连接，仅改本地状态不会让它重新出声。
 async function resumeRadio() {
-  const c = cfg();
-  const token = await getToken();
+  let token;
+  try { token = await getToken(); } catch (e) { return { ok: false }; }
   const bots = await getBots(token);
-  const bot = pickBot(c, bots) || bots[0];
-  if (!bot || !bot.serverConfigId) return { ok: false };
-  const stationId = await ensureStation(token, bot.serverConfigId);
-  await authFetch('POST', '/api/music-bots/' + bot.id + '/play-radio', token, { stationId });
-  return { ok: true, botId: bot.id };
+  const targets = ourBots(bots);
+  if (!targets.length) return { ok: false, count: 0 };
+  const c = cfg();
+  const scId = targets[0].serverConfigId || (await ensureServer(token, c));
+  const stationId = await ensureStation(token, scId);
+  let n = 0;
+  for (const b of targets) {
+    try {
+      const r = await authFetch('POST', '/api/music-bots/' + b.id + '/play-radio', token, { stationId });
+      if (r.status === 200) n++;
+    } catch (e) { /* 继续 */ }
+  }
+  return { ok: n > 0, count: n };
 }
 
-module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
-// 内部测试钩子（非公开接口）：供单元测试直接驱动「频道无人自动暂停/有人自动恢复」逻辑
+module.exports = { link, unlink, deleteBot, status, cfg, listChannels, resumeRadio, configChannels, assignNames };
 module.exports._internal = {
   maybeAutoPauseEmpty,
   getChannelClientCount,
-  // 测试钩子：重启后看门狗是否应保持工作（desiredLinked 已随持久化 botId 恢复）
+  countRealVoiceUsersByChannel,
+  findChannelBot,
+  botNameFor,
   isLinkedDesired: () => desiredLinked,
 };
 
-// 从 TS 服务器真实客户端列表取音乐机器人“当前所在”频道（权威、全可见）。
-// ts6-manager 用 WebQuery 能拿到完整 clientlist；从中按昵称找到音乐机器人，读出它所在的 cid。
-// 返回 { cid, name } 或 null。
-async function getBotCurrentChannelServerSide() {
-  try {
-    const t = await getToken();
-    const c = cfg();
-    const bots = await getBots(t);
-    const target = pickBot(c, bots);
-    if (!target) return null;
-    const scId = target.serverConfigId || (await ensureServer(t, c));
-    const sid = await getVirtualServerId(t, scId);
-    const nick = (target.nickname || target.name || botNickname());
-    // 稳定身份：ts6-manager 记录的音乐机器人 TS client id（clid）。昵称可被普通用户改名冒充，
-    // 但机器人的 TS 客户端 id 不会变，用它精确定位才不会被同名用户劫持跟随到错误频道。
-    let targetClid = b_clid(target);
-    if (targetClid == null) targetClid = await getBotClid(); // 兜底：用此前缓存（status/refresh 常见）
-    // 方法A：直接取客户端列表
-    let clients = [];
-    try {
-      const r = await authFetch('GET', '/api/servers/' + scId + '/vs/' + sid + '/clients', t);
-      if (r.status === 200) clients = toArray(r.json);
-    } catch (e) { /* 忽略 */ }
-    console.log('[tsbridge][botChan] clients端点返回 ' + clients.length + ' 个客户端: '
-      + JSON.stringify(clients.map((cl) => ({ n: cl.nickname || cl.client_nickname, cid: cl.cid || cl.channel_id || cl.channelId }))));
-    // 用 ts6-manager 里该 bot 的实际昵称（target.nickname/name）与稳定 clid 一起定位；
-    // 优先 clid（昵称可被冒充，cid 不能），昵称精确再 includes 兜底。
-    const clidOfCl = (cl) => cl.clid != null ? cl.clid : (cl.client_id != null ? cl.client_id : (cl.clientId != null ? cl.clientId : null));
-    const findBot = (list) => {
-      if (targetClid != null) {
-        const byClid = list.find((cl) => String(clidOfCl(cl)) === String(targetClid));
-        if (byClid) return byClid;
-      }
-      return list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick)
-        || list.find((cl) => ((cl.nickname || cl.client_nickname) || '').includes(nick));
-    };
-    let bot = findBot(clients);
-    let cid = null;
-    if (bot) {
-      cid = bot.cid != null ? bot.cid : (bot.channel_id != null ? bot.channel_id : (bot.channelId != null ? bot.channelId : null));
-    }
-    // 方法B：遍历频道，找含该昵称客户端的频道（部分实现把客户端挂在频道对象里）
-    if (cid == null) {
-      try {
-        const chs = await getChannels(t, scId);
-        for (const ch of chs) {
-          const raw = ch.clientsRaw;
-          if (Array.isArray(raw) && raw.length) {
-            if (findBot(raw)) { cid = ch.id; break; }
-          }
-        }
-      } catch (e) { /* 忽略 */ }
-    }
-    if (cid == null) return null;
-    let name = null;
-    try { const chs = await getChannels(t, scId); const h = chs.find((ch) => String(ch.id) === String(cid)); if (h) name = h.name; } catch (e) {}
-    console.log('[tsbridge][botChan] 服务端定位音乐机器人当前频道：cid=' + cid + ' name=' + (name || '?'));
-    return { cid: String(cid), name };
-  } catch (e) {
-    console.log('[tsbridge][botChan] 失败: ' + (e && e.message ? e.message : e));
-    return null;
-  }
-}
-
-// 取音乐机器人当前所在频道（name + cid）。
-// 优先用 TS 服务器真实客户端列表（权威、全可见，不受 ServerQuery 不可靠视图影响）；
-// 兜底再用 defaultChannel（仅配置值，非实时）。返回 { cid, name } 或 null。
-async function getBotChannel() {
-  try {
-    const fromServer = await getBotCurrentChannelServerSide();
-    if (fromServer && fromServer.cid != null) return fromServer;
-  } catch (e) { /* 忽略，走兜底 */ }
-  try {
-    const t = await getToken();
-    const c = cfg();
-    const bots = await getBots(t);
-    const target = pickBot(c, bots);
-    if (!target) return null;
-    const scId = target.serverConfigId || (await ensureServer(t, c));
-    const { status, json } = await authFetch('GET', '/api/music-bots/' + target.id, t);
-    if (status !== 200) return null;
-    const b = (json.data && (json.data.bot || json.data)) || json;
-    const chName = b.currentChannel || b.channel || b.channelName || b.defaultChannel || null;
-    let cid = null;
-    try {
-      const channels = await getChannels(t, scId);
-      const lower = (chName || '').trim().toLowerCase();
-      const hit = channels.find((x) => (x.name || '').trim().toLowerCase() === lower)
-        || channels.find((x) => ((x.path || x.name || '').trim().toLowerCase() === lower))
-        || channels.find((x) => ((x.path || x.name || '').trim().toLowerCase().endsWith(lower.split('/').pop())));
-      if (hit) cid = hit.id;
-    } catch (e) { /* 忽略 */ }
-    if (cid == null) cid = b.channelId != null ? b.channelId : (b.cid != null ? b.cid : null);
-    if (!chName && cid == null) return null;
-    return { cid: cid != null ? String(cid) : null, name: chName };
-  } catch (e) { return null; }
-}
-
-// 若之前已成功连接过（botId 已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
+// 若之前已成功连接过（botId/频道绑定已持久化），启动看门狗，容器重启/网络抖动后自动恢复在线。
 // 必须同时把 desiredLinked 置回 true：它只在 link() 成功时被置位，容器重启后恒为 false，
 // 看门狗会在 tick 里直接 return——频道无人自动暂停与断线自动重连在每次重启/部署后全部失效
 // （机器人本身活在 ts6-manager 进程里不受影响，问题因此很难被察觉）。
-if (config.ts6mgrBotId) {
+if (config.ts6mgrBotId || Object.keys(botBindings()).length) {
   desiredLinked = true;
   startWatchdog();
 }

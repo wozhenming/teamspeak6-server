@@ -9,8 +9,8 @@ const env = (k, f) => {
   return v === undefined || v === '' ? f : v;
 };
 
-// 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，clear=清队列，search=搜索，queue=队列，loop=循环，status=状态，switch=切频道
-const CHAT_CMD_DEFAULT = { dian: true, play: true, playat: true, pause: true, next: true, clear: true, search: true, queue: true, loop: true, status: true, switch: true };
+// 聊天点歌可用指令（面板管理开关）：dian=点歌，play=播放，pause=暂停，next=切歌，clear=清队列，search=搜索，queue=队列，loop=循环，status=状态
+const CHAT_CMD_DEFAULT = { dian: true, play: true, playat: true, pause: true, next: true, clear: true, search: true, queue: true, loop: true, status: true };
 
 const config = {
   // music-bot 自身监听
@@ -35,6 +35,12 @@ const config = {
   ts6mgrPass: env('TS6MGR_PASS', 'Tsbot123'),
   ts6mgrBotId: env('TS6MGR_BOT_ID', ''),
   ts6mgrChannel: env('TS6MGR_CHANNEL', ''),
+  // 每个频道固定部署一个点歌机器人 + 一个点歌助手（一频道一套，不跨频道移动）。
+  // 逗号分隔；兼容旧的单频道 TS6MGR_CHANNEL。
+  ts6mgrChannels: String(env('TS6MGR_CHANNELS', '') || env('TS6MGR_CHANNEL', ''))
+    .split(',').map((s) => s.trim()).filter(Boolean),
+  // 已创建机器人的固定绑定：{ 频道路径: ts6-manager botId }（持久化，避免重复建）
+  ts6mgrChannelBots: {},
   // 点歌机器人昵称：用作 ts6-manager 内机器人的 name/nickname，以及点歌助手跟随定位的识别名。
   // 可对机器人改名后在此配置为实际昵称；面板可编辑并持久化。
   ts6mgrBotNickname: env('TS6MGR_BOT_NICKNAME', '点歌机器人'),
@@ -83,6 +89,14 @@ function loadTsBridge() {
     if (o.ts6mgrPass) config.ts6mgrPass = o.ts6mgrPass;
     if (o.ts6mgrBotId) config.ts6mgrBotId = o.ts6mgrBotId;
     if (o.ts6mgrChannel) config.ts6mgrChannel = o.ts6mgrChannel;
+    if (Array.isArray(o.ts6mgrChannels)) {
+      config.ts6mgrChannels = o.ts6mgrChannels.map((s) => String(s).trim()).filter(Boolean);
+    } else if (o.ts6mgrChannel) {
+      config.ts6mgrChannels = [String(o.ts6mgrChannel).trim()].filter(Boolean); // 旧配置迁移
+    }
+    if (o.ts6mgrChannelBots && typeof o.ts6mgrChannelBots === 'object') {
+      config.ts6mgrChannelBots = o.ts6mgrChannelBots;
+    }
     if (o.ts6mgrBotNickname) config.ts6mgrBotNickname = o.ts6mgrBotNickname;
     if (o.tsHost) config.tsHost = o.tsHost;
     if (o.tsWebqueryPort != null) config.tsWebqueryPort = parseInt(o.tsWebqueryPort, 10);
@@ -110,6 +124,14 @@ config.saveTsBridge = (o) => {
     ts6mgrPass: (o.ts6mgrPass || '').trim() || config.ts6mgrPass,
     ts6mgrBotId: (o.ts6mgrBotId || '').trim() || config.ts6mgrBotId,
     ts6mgrChannel: (o.ts6mgrChannel || '').trim() || config.ts6mgrChannel,
+    // 频道列表：传数组则整体替换（允许清空为 []）；不传保持原值
+    ts6mgrChannels: Array.isArray(o.ts6mgrChannels)
+      ? o.ts6mgrChannels.map((s) => String(s).trim()).filter(Boolean)
+      : (Array.isArray(config.ts6mgrChannels) ? config.ts6mgrChannels.slice() : []),
+    // 频道→botId 固定绑定：传对象则整体替换；不传保持原值
+    ts6mgrChannelBots: (o.ts6mgrChannelBots && typeof o.ts6mgrChannelBots === 'object')
+      ? o.ts6mgrChannelBots
+      : (config.ts6mgrChannelBots || {}),
     ts6mgrBotNickname: (o.ts6mgrBotNickname || '').trim() || config.ts6mgrBotNickname,
     tsHost: (o.tsHost || '').trim() || config.tsHost,
     tsWebqueryPort: o.tsWebqueryPort != null ? parseInt(o.tsWebqueryPort, 10) : config.tsWebqueryPort,
@@ -128,6 +150,9 @@ config.saveTsBridge = (o) => {
     autoPauseEmpty: o.autoPauseEmpty != null ? !!o.autoPauseEmpty : config.autoPauseEmpty,
   };
   Object.assign(config, next);
+  // 兼容：单频道字段始终镜像频道列表第一项
+  next.ts6mgrChannel = next.ts6mgrChannels[0] || '';
+  config.ts6mgrChannel = next.ts6mgrChannel;
   try { fs.writeFileSync(tsBridgeFile, JSON.stringify(next, null, 2)); } catch (e) { /* 忽略 */ }
   return next;
 };

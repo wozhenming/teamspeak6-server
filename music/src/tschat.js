@@ -1,19 +1,16 @@
 'use strict';
 
 /**
- * TS 频道聊天点歌监听。
+ * TS 频道聊天点歌监听（每频道一个点歌助手）。
  *
- * 原理：以 serveradmin 通过 SSH ServerQuery 登录本 TS 服务器，把查询客户端
- * 移动到点歌机器人所在频道并订阅该频道文本消息（servernotifyregister
- * event=textchannel）。同频道用户在频道聊天里发送：
+ * 每个配置的频道各有一条独立的 SSH ServerQuery 连接，昵称为「点歌助手」
+ * （多频道时加「·频道名」后缀），启动后驻留自己的频道，绝不跨频道移动：
  *
- *   !点歌 2652820720
- *   !点歌 https://music.163.com/song?id=2652820720
- *   !点歌 https://music.163.com/song/2652820720/
- *   （或整条消息就是一个纯 ID / 链接，无需前缀）
+ *   默认频道/点歌专区  ← 点歌助手（收本频道的 !点歌 等指令）
+ *   默认频道/游戏专区  ← 点歌助手·游戏专区（收本频道的 !点歌 等指令）
  *
- * 即自动提取歌曲 ID → 拉取歌曲详情 → 加入点歌队列（requestedBy 记录 TS 昵称），
- * 若当前没有播放则立即开始播放，并向频道回执结果。
+ * 各频道发指令 → 提取歌曲 ID → 加入全局点歌队列 → 回执到指令所在频道。
+ * 队列/播放全局共享，任一频道点歌都影响同一路电台流。
  *
  * 启用条件：配置了 TS_QUERY_ADMIN_PASSWORD 且未显式禁用（TS_CHAT_ENABLED=0）。
  */
@@ -24,16 +21,27 @@ const queue = require('./queue');
 const player = require('./player');
 const tsbridge = require('./tsbridge');
 
-let conn = null;          // 当前 ssh 连接
-let stream = null;        // shell 数据流
-let retryTimer = null;
-let started = false;
-let state = 'stopped';    // stopped | connecting | listening | error
-// 串行化所有“移动查询端到频道”的操作，避免并发 join/自检互相读取到过期的 myCid 造成反复移动/报错
-let moveChain = Promise.resolve();
-function enqueueMove(task) {
-  const run = moveChain.then(task, task);
-  moveChain = run.then(() => {}, () => {});
+// ---------- 会话表：频道 → 点歌助手连接 ----------
+const sessions = new Map(); // channelPath -> session
+
+function createSession(channel) {
+  return {
+    channel,            // 绑定的频道路径（固定，不移动）
+    nick: '',           // 本会话昵称（用于过滤自己发的消息）
+    conn: null,         // ssh 连接
+    stream: null,       // shell 数据流
+    state: 'stopped',   // stopped | connecting | listening | error
+    retryTimer: null,
+    moveChain: Promise.resolve(),
+    pending: [],        // 本会话的命令 FIFO
+    started: false,
+  };
+}
+
+// 串行化单会话内所有“移动/自检”操作，避免并发读取过期状态
+function enqueueMove(session, task) {
+  const run = session.moveChain.then(task, task);
+  session.moveChain = run.then(() => {}, () => {});
   return run;
 }
 
@@ -46,6 +54,20 @@ function enabled() {
   if (envKillSwitch()) return false;
   if (config.tsChatEnabled === false) return false;
   return !!config.tsQueryAdminPassword;
+}
+
+// ---------- 点歌助手命名 ----------
+function assistantBase() {
+  return (process.env.TS_CHAT_NICKNAME || '点歌助手').trim() || '点歌助手';
+}
+
+// 某频道对应的点歌助手名：单频道用原名；多频道加「·频道名」后缀（与机器人同规则）
+function assistantNameFor(channel) {
+  const channels = tsbridge.configChannels();
+  const names = tsbridge.assignNames(channels, assistantBase());
+  if (names[channel]) return names[channel];
+  // 频道刚加、还没同步进配置时的兜底
+  return channels.length === 1 ? assistantBase() : assistantBase() + '·' + String(channel).split('/').pop();
 }
 
 // ---------- ServerQuery 行协议小工具 ----------
@@ -71,8 +93,8 @@ function isRowSeparator(line, idx) {
   return bs % 2 === 0;
 }
 // TS6 ServerQuery 会把多条结果行用 '|' 拼在同一行返回（如 channellist/clientlist/serverlist），
-// 单行 parseParams 会把它们合并成一个错乱对象（字段跨行混搭、仅留最后一行值），导致点歌助手
-// 无法正确定位点歌机器人所在频道。这里先把一行按未转义的 '|' 拆成多行，再逐行解析。
+// 单行 parseParams 会把它们合并成一个错乱对象（字段跨行混搭、仅留最后一行值），导致
+// 无法正确解析列表。这里先把一行按未转义的 '|' 拆成多行，再逐行解析。
 function splitRows(line) {
   const rows = [];
   let start = 0;
@@ -123,10 +145,10 @@ function ensurePlaying() {
   else player.resume();
 }
 
-async function addSong(body, invokerName) {
+async function addSong(body, invokerName, reply) {
   const songId = extractSongId(body);
   if (!songId) {
-    reply(invokerName, '用法：!点歌 <歌曲ID 或 网易云链接>');
+    reply('用法：!点歌 <歌曲ID 或 网易云链接>');
     return;
   }
   try {
@@ -147,84 +169,52 @@ async function addSong(body, invokerName) {
     }, (invokerName || 'TS用户') + '(TS)');
     ensurePlaying(); // 队列为空或未在播放时自动开播
     const pos = queue.all().length;
-    reply(invokerName, '✔ 已加入队列：' + detail.name + '（第 ' + pos + ' 位）');
+    reply('✔ 已加入队列：' + detail.name + '（第 ' + pos + ' 位）');
   } catch (e) {
-    reply(invokerName, '✖ 点歌失败：' + e.message);
+    reply('✖ 点歌失败：' + e.message);
   }
 }
 
-function runControl(cmd, invokerName, arg) {
+function runControl(cmdName, invokerName, arg, reply) {
   try {
     const st = player.get();
-    if (cmd === 'play') {
+    if (cmdName === 'play') {
       const at = parsePosition(arg);
-      if (at) { runPlayAt(at, invokerName); return; }
+      if (at) { runPlayAt(at, invokerName, reply); return; }
       if (!st.current) player.play();
       else player.resume();
       require('./tsbridge').resumeRadio().catch(() => {});
-      reply(invokerName, st.current && st.current.title ? '▶ 已继续播放：' + st.current.title : '▶ 已开始播放');
-    } else if (cmd === 'pause') {
+      reply(st.current && st.current.title ? '▶ 已继续播放：' + st.current.title : '▶ 已开始播放');
+    } else if (cmdName === 'pause') {
       player.pause();
-      reply(invokerName, '⏸ 已暂停');
-    } else if (cmd === 'next') {
+      reply('⏸ 已暂停');
+    } else if (cmdName === 'next') {
       const r = player.next();
       const cur = r && r.current;
-      reply(invokerName, cur ? '⏭ 已切歌：' + cur.title : '队列末尾/为空，无法继续切');
+      reply(cur ? '⏭ 已切歌：' + cur.title : '队列末尾/为空，无法继续切');
       // 切歌后主动重新向 ts6-manager 下达 play-radio：即便它此前因流空档报
       // “Queue empty” 停掉了点歌机器人，也能立即恢复拉流，避免掉线。
       require('./tsbridge').resumeRadio().catch(() => {});
-    } else if (cmd === 'clear') {
-      runClear(invokerName);
-    } else if (cmd === 'search') {
-      runSearch(arg || '', invokerName);
-    } else if (cmd === 'queue') {
-      runQueue(arg || '', invokerName);
-    } else if (cmd === 'switch') {
-      runSwitchChannel(arg || '', invokerName);
+    } else if (cmdName === 'clear') {
+      runClear(invokerName, reply);
+    } else if (cmdName === 'search') {
+      runSearch(arg || '', invokerName, reply);
+    } else if (cmdName === 'queue') {
+      runQueue(arg || '', invokerName, reply);
     }
   } catch (e) {
-    reply(invokerName, '✖ 操作失败：' + e.message);
+    reply('✖ 操作失败：' + e.message);
   }
-}
-
-// 切换机器人所在频道：!切频道 <频道名或路径>
-function runSwitchChannel(arg, invokerName) {
-  const name = (arg || '').trim();
-  if (!name) {
-    reply(invokerName, '用法：!切频道 <频道名或路径>，例如 !切频道 点歌专区');
-    return;
-  }
-  (async () => {
-    try {
-      const tsbridge = require('./tsbridge');
-      const channels = await tsbridge.listChannels();
-      if (!channels || !channels.length) return reply(invokerName, '✖ 暂无可切换的频道列表');
-      const lower = name.toLowerCase();
-      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === lower)
-        || channels.find((c) => (c.path || c.name || '').toLowerCase().includes(lower));
-      if (!hit) {
-        const names = channels.slice(0, 10).map((c) => c.path || c.name).join('、');
-        return reply(invokerName, '✖ 未找到频道「' + name + '」，可选：' + names);
-      }
-      const path = hit.path || hit.name;
-      await tsbridge.switchChannel(path);
-      // 机器人切频道后，让聊天点歌查询端也跟随到新频道，否则收不到该频道的指令
-      try { await new Promise((r) => setTimeout(r, 1500)); await joinBotChannel(); } catch (e) { console.log('[tschat] 切频道后重新加入失败: ' + (e && e.message)); }
-      reply(invokerName, '✅ 已切换到频道：' + path + '（点歌助手已跟随）');
-    } catch (e) {
-      reply(invokerName, '✖ 切换失败：' + e.message);
-    }
-  })();
 }
 
 // 清空点歌队列（并停止当前播放，emitChange(null) 会触发 player 停止）
-function runClear(invokerName) {
+function runClear(invokerName, reply) {
   try {
     const n = queue.all().length;
     queue.clear();
-    reply(invokerName, n ? ('🧹 已清空点歌队列（' + n + ' 首）') : '队列本来就是空的');
+    reply(n ? ('🧹 已清空点歌队列（' + n + ' 首）') : '队列本来就是空的');
   } catch (e) {
-    reply(invokerName, '✖ 清空失败：' + e.message);
+    reply('✖ 清空失败：' + e.message);
   }
 }
 
@@ -238,21 +228,21 @@ function parsePosition(text) {
 }
 
 // 跳播队列指定位置（1 基）：!播放第3首 / !播3 / !跳3 / !播放 3
-function runPlayAt(n, invokerName) {
+function runPlayAt(n, invokerName, reply) {
   const all = queue.all();
-  if (!all.length) return reply(invokerName, '队列为空，用 !点歌 <ID> 添加歌曲');
+  if (!all.length) return reply('队列为空，用 !点歌 <ID> 添加歌曲');
   if (!Number.isInteger(n) || n < 1 || n > all.length) {
-    return reply(invokerName, '✖ 队列只有 ' + all.length + ' 首，无法播放第 ' + n + ' 首');
+    return reply('✖ 队列只有 ' + all.length + ' 首，无法播放第 ' + n + ' 首');
   }
   const item = all[n - 1];
   const res = player.play(item.id);
   const played = res.current || item;
   require('./tsbridge').resumeRadio().catch(() => {});
-  reply(invokerName, '▶ 已跳播第 ' + n + ' 首：' + (played.title || played.name) + (played.artists ? ' - ' + played.artists : ''));
+  reply('▶ 已跳播第 ' + n + ' 首：' + (played.title || played.name) + (played.artists ? ' - ' + played.artists : ''));
 }
 
 // 查看播放队列（分页，每页最多 10 首）：!队列 [页码]
-function runQueue(arg, invokerName) {
+function runQueue(arg, invokerName, reply) {
   const all = queue.all();
   const total = all.length;
   const pageSize = 10;
@@ -271,12 +261,12 @@ function runQueue(arg, invokerName) {
   const start = (page - 1) * pageSize;
   const slice = all.slice(start, start + pageSize);
   if (!total) {
-    reply(invokerName, '队列为空，用 !点歌 <ID> 添加歌曲');
+    reply('队列为空，用 !点歌 <ID> 添加歌曲');
     return;
   }
   const lines = slice.map((s, i) => {
     const idx = start + i + 1;
-    const mark = (s.id === curId) ? '▶ ' : '  ';
+    const mark = (s.id === curId) ? '▶ ' : '  ';
     const artists = s.artists ? ' - ' + s.artists : '';
     const sid = s.songId || s.id;
     return mark + idx + '. ' + s.title + artists + '  (ID:' + sid + ')';
@@ -285,14 +275,14 @@ function runQueue(arg, invokerName) {
   if (pages > 1) {
     msg += '\n!队列 ' + (page < pages ? (page + 1) : 1) + ' 查看' + (page < pages ? '下一页' : '首页');
   }
-  reply(invokerName, msg);
+  reply(msg);
 }
 
 // 按关键词搜索歌曲，返回前 5 首：歌名 - 歌手（ID）
-function runSearch(keyword, invokerName) {
+function runSearch(keyword, invokerName, reply) {
   keyword = (keyword || '').trim();
   if (!keyword) {
-    reply(invokerName, '用法：!搜索 <歌曲名/关键字>，例如 !搜索 周杰伦');
+    reply('用法：!搜索 <歌曲名/关键字>，例如 !搜索 周杰伦');
     return;
   }
   // 异步执行，避免阻塞命令分发
@@ -301,16 +291,16 @@ function runSearch(keyword, invokerName) {
       const result = await enhanced.search(keyword, 'song', 5, 0);
       const songs = (result && result.songs) || [];
       if (!songs.length) {
-        reply(invokerName, '未找到与「' + keyword + '」相关的歌曲');
+        reply('未找到与「' + keyword + '」相关的歌曲');
         return;
       }
       const lines = songs.slice(0, 5).map((s, i) => {
         const artists = Array.isArray(s.artists) ? s.artists.map((a) => a.name).join('/') : (s.artist || '');
         return (i + 1) + '. ' + s.name + (artists ? ' - ' + artists : '') + '  (ID:' + s.id + ')';
       });
-      reply(invokerName, '🔍 搜索「' + keyword + '」前 ' + lines.length + ' 首：\n' + lines.join('\n') + '\n用 !点歌 <ID> 点播');
+      reply('🔍 搜索「' + keyword + '」前 ' + lines.length + ' 首：\n' + lines.join('\n') + '\n用 !点歌 <ID> 点播');
     } catch (e) {
-      reply(invokerName, '✖ 搜索失败：' + e.message);
+      reply('✖ 搜索失败：' + e.message);
     }
   })();
 }
@@ -322,8 +312,7 @@ const CTRL_MAP = {
   next: 'next', skip: 'next', 切歌: 'next', 下一首: 'next',
   clear: 'clear', 清队列: 'clear', 清空队列: 'clear', 清队: 'clear', 清掉队列: 'clear',
   search: 'search', 搜: 'search', 搜索: 'search', 查找: 'search', 找歌: 'search', find: 'search',
-  queue: 'queue', 队列: 'queue', 列表: 'queue', q: 'queue',   playlist: 'queue', 待播: 'queue',
-  switch: 'switch', 切频道: 'switch', 切换频道: 'switch', switchchannel: 'switch',
+  queue: 'queue', 队列: 'queue', 列表: 'queue', q: 'queue', playlist: 'queue', 待播: 'queue',
 };
 const LOOP_WORDS = { loop: 1, cycle: 1, 循环: 1, 循环模式: 1 };
 const LOOP_MODES = {
@@ -340,27 +329,27 @@ function cmdEnabled(name) {
   return cmds[name] !== false;
 }
 
-function runLoop(arg, invokerName) {
+function runLoop(arg, invokerName, reply) {
   try {
     const a = (arg || '').trim().toLowerCase();
     let mode = LOOP_MODES[a];
     let cur = player.get().loopMode;
     if (!mode) {
-      if (a) { reply(invokerName, '循环模式：!循环 <列表|单曲|随机|关>（当前：' + (LOOP_LABEL[cur] || cur) + '）'); return; }
+      if (a) { reply('循环模式：!循环 <列表|单曲|随机|关>（当前：' + (LOOP_LABEL[cur] || cur) + '）'); return; }
       const order = ['all', 'one', 'shuffle', 'off'];
       mode = order[(order.indexOf(cur) + 1) % order.length]; // 不给参数则循环切换
     }
     player.setLoop(mode);
-    reply(invokerName, '循环模式 → ' + (LOOP_LABEL[player.get().loopMode] || player.get().loopMode));
+    reply('循环模式 → ' + (LOOP_LABEL[player.get().loopMode] || player.get().loopMode));
   } catch (e) {
-    reply(invokerName, '✖ 切换循环失败：' + e.message);
+    reply('✖ 切换循环失败：' + e.message);
   }
 }
 
 // !状态：正在播放 / 下一首 / 播放与循环状态
 const STATUS_WORDS = { 状态: 1, now: 1, 当前: 1, playing: 1, 正在播放: 1 };
 function mm(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
-function runStatus(invokerName) {
+function runStatus(invokerName, reply) {
   try {
     const st = player.get();
     const all = queue.all();
@@ -375,17 +364,16 @@ function runStatus(invokerName) {
       const nxt = (idx >= 0 && idx + 1 < all.length) ? all[idx + 1] : (st.loopMode === 'all' && all[0] ? all[0] : null);
       if (nxt) nextTxt = nxt.title + (nxt.artists ? ' - ' + nxt.artists : '');
     }
-    reply(invokerName,
-      '正在播放：' + nowTxt + '｜下一首：' + nextTxt + '｜' +
+    reply('正在播放：' + nowTxt + '｜下一首：' + nextTxt + '｜' +
       (st.playing ? '▶播放中' : '⏸已暂停') + '｜' + '循环：' + (LOOP_LABEL[st.loopMode] || st.loopMode) +
       '｜队列：' + all.length + ' 首');
   } catch (e) {
-    reply(invokerName, '✖ 状态查询失败：' + e.message);
+    reply('✖ 状态查询失败：' + e.message);
   }
 }
 
-const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', switch: 'switch', playat: 'playat' };
-function handleRequest(rawText, invokerName) {
+const CMD_NAME = { play: 'play', pause: 'pause', next: 'next', clear: 'clear', search: 'search', queue: 'queue', playat: 'playat' };
+function handleRequest(rawText, invokerName, reply) {
   const text = (rawText || '').trim();
   if (!text) return;
   const ctl = text.match(/^!\s*(\S+)\s*(.*)$/);
@@ -394,70 +382,61 @@ function handleRequest(rawText, invokerName) {
     const rest = ctl[2].trim();
     if (CTRL_MAP[w]) {
       const name = CMD_NAME[CTRL_MAP[w]];
-      if (!cmdEnabled(name)) return reply(invokerName, '该指令已被管理员禁用');
-      runControl(CTRL_MAP[w], invokerName, rest);
+      if (!cmdEnabled(name)) return reply('该指令已被管理员禁用');
+      runControl(CTRL_MAP[w], invokerName, rest, reply);
       return;
     }
     if (LOOP_WORDS[w]) {
-      if (!cmdEnabled('loop')) return reply(invokerName, '循环指令已被管理员禁用');
-      runLoop(rest, invokerName);
+      if (!cmdEnabled('loop')) return reply('循环指令已被管理员禁用');
+      runLoop(rest, invokerName, reply);
       return;
     }
     if (STATUS_WORDS[w]) {
-      if (!cmdEnabled('status')) return reply(invokerName, '状态指令已被管理员禁用');
-      runStatus(invokerName);
+      if (!cmdEnabled('status')) return reply('状态指令已被管理员禁用');
+      runStatus(invokerName, reply);
       return;
     }
     if (['点歌', '点', 'dian', 'song', 'req', '点播'].includes(w)) {
-      if (!cmdEnabled('dian')) return reply(invokerName, '点歌指令已被管理员禁用');
-      addSong(rest, invokerName);
+      if (!cmdEnabled('dian')) return reply('点歌指令已被管理员禁用');
+      addSong(rest, invokerName, reply);
       return;
     }
     // 跳播队列第 N 首：!播放第3首 / !播3 / !跳3 / !第3首 / !play3
     const playAtMatch = text.match(/^!\s*(?:播|播放|跳|选|放|第|play|jump|goto|select|p)\s*第?\s*(\d+)\s*(?:首|位|个|song)?\s*$/i);
     if (playAtMatch) {
-      if (!cmdEnabled('playat')) return reply(invokerName, '该指令已被管理员禁用');
-      runPlayAt(parseInt(playAtMatch[1], 10), invokerName);
+      if (!cmdEnabled('playat')) return reply('该指令已被管理员禁用');
+      runPlayAt(parseInt(playAtMatch[1], 10), invokerName, reply);
       return;
     }
-    reply(invokerName, '可用指令：!点歌 <歌曲ID或链接> · !播放(第N首) · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !切频道 <频道名> · !循环 · !状态');
+    reply('可用指令：!点歌 <歌曲ID或链接> · !播放(第N首) · !暂停 · !切歌 · !清队列 · !搜索 <关键词> · !队列 [页码] · !循环 · !状态');
     return;
   }
   // 无前缀：整条就是歌曲 ID 或链接才视为点歌（避免把闲聊话题误当成点歌）
   if (/^https?:\/\//i.test(text) || /^\d{4,12}$/.test(text)) {
     if (!cmdEnabled('dian')) return;
-    addSong(text, invokerName);
+    addSong(text, invokerName, reply);
   }
 }
 
-// 向频道回执（targetmode=2 为频道聊天）
-function reply(invokerName, msg) {
-  cmd('sendtextmessage targetmode=2 msg=' + esc('[点歌] ' + msg)).catch(() => {});
-}
-
-// ---------- 单一分发器：所有行经此路由（通知 / 命令应答） ----------
-// 每条命令串行排队，应答按到达顺序配对，避免多监听器抢行导致的超时/错位。
-const pending = []; // { rows, resolve, reject, timer }
-function dispatchLine(line) {
+// ---------- 单会话命令收发：应答按到达顺序配对（每会话独立 FIFO） ----------
+function dispatchLine(session, line) {
   if (line.startsWith('notifytextmessage')) {
     const p = parseParams(line);
-    console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' tm=' + (p.targetmode || '?') + ' msg=' + String(p.msg || '').slice(0, 120));
+    console.log('[tschat][' + session.channel + '] 收到聊天 from=' + (p.invokername || '?') + ' tm=' + (p.targetmode || '?') + ' msg=' + String(p.msg || '').slice(0, 120));
     const invName = (p.invokername || '').trim();
-    // 仅忽略“自己发出的回执”（按昵称判断，最可靠）；不再用 uid==='serveradmin' 过滤，
-    // 因为该 TS 服务器的 ServerQuery 会把所有消息的 invokeruid 都报成 serveradmin，会误杀真实用户指令。
-    if (invName && invName === myNick) return;
-    handleRequest(p.msg || '', invName || '?');
+    // 仅忽略“自己发出的回执”（按本会话昵称判断，最可靠）
+    if (invName && invName === session.nick) return;
+    handleRequest(p.msg || '', invName || '?', (msg) => reply(session, msg));
     return;
   }
-  const head = pending[0];
+  const head = session.pending[0];
   if (!head) return;
   if (/^error id=/i.test(line)) {
-    pending.shift();
+    session.pending.shift();
     clearTimeout(head.timer);
     if (/^error id=0\b/i.test(line)) {
       const rows = head.rows;
       // 成功应答：若只解析出一行（多数命令）返回该对象，多行（列表类）返回数组。
-      // 兼容 TS3 单选行与 TS6 的 '|' 拼接多行的两种格式。
       resolveHead(head, rows.length ? (rows.length === 1 ? rows[0] : rows) : {});
     } else {
       rejectHead(head, new Error(line));
@@ -470,19 +449,24 @@ function dispatchLine(line) {
 function resolveHead(h, v) { try { h.resolve(v); } catch (e) {} }
 function rejectHead(h, e) { try { h.reject(e); } catch (e2) {} }
 
-// 发送命令并等待其应答（串行 FIFO 配对）
-function cmd(cmdStr, timeoutMs = 6000) {
+// 发送命令并等待其应答（单会话内串行 FIFO 配对）
+function cmd(session, cmdStr, timeoutMs = 6000) {
   return new Promise((resolve, reject) => {
-    if (!stream) return reject(new Error('chat 连接未就绪'));
+    if (!session.stream) return reject(new Error('chat 连接未就绪'));
     const entry = { rows: [], resolve, reject, timer: null };
     entry.timer = setTimeout(() => {
-      const i = pending.indexOf(entry);
-      if (i >= 0) pending.splice(i, 1);
+      const i = session.pending.indexOf(entry);
+      if (i >= 0) session.pending.splice(i, 1);
       reject(new Error('cmd 超时: ' + cmdStr));
     }, timeoutMs);
-    pending.push(entry);
-    stream.write(cmdStr + '\n');
+    session.pending.push(entry);
+    session.stream.write(cmdStr + '\n');
   });
+}
+
+// 向本会话所在频道回执（targetmode=2 为频道聊天）
+function reply(session, msg) {
+  cmd(session, 'sendtextmessage targetmode=2 msg=' + esc('[点歌] ' + msg)).catch(() => {});
 }
 
 // TeamSpeak ServerQuery 参数转义：空格→\s，反斜杠→\\，竖线→\p（频道名含空格必须转义）
@@ -493,47 +477,48 @@ function q(str) {
     .replace(/ /g, '\\s');
 }
 
-// 用查询端自己的 channelidbyname 把“频道名”解析成查询端视角的 cid（编号空间以 ServerQuery 为准）。
-// 若该命令受限失败，则逐个探测 channelinfo cid=1..N 按频道名匹配（已验证 channelinfo 对本查询端可用）。
-// 返回字符串 cid 或 null。
-async function resolveCidByName(name) {
-  if (!name) return null;
-  const want = String(name).trim().toLowerCase();
+// 用 channelidbyname 把“频道名”解析成 cid；受限失败则逐个探测 channelinfo 兜底。
+// 支持「完整路径」与「叶子频道名」两种写法（TS 的 channel_name 只有叶子）。
+async function resolveChannelCid(session, channelPath) {
+  const want = String(channelPath || '').trim();
+  const leaf = want.split('/').pop().trim().toLowerCase();
+  const tryMatch = (obj) => {
+    const n = String(obj.channel_name || '').trim().toLowerCase();
+    return n === want.toLowerCase() || (leaf && n === leaf) || null;
+  };
   try {
-    const r = await cmd('channelidbyname channel_name=' + q(name));
-    const obj = (Array.isArray(r) ? r[0] : r) || {};
-    if (obj.cid != null) return String(obj.cid);
-    const m = JSON.stringify(r).match(/cid[=\s:'"]+(\d+)/i);
-    if (m) return m[1];
-  } catch (e) {
-    console.log('[tschat] channelidbyname(' + name + ') 失败，改探测 channelinfo：' + (e.message || e));
-  }
+    const cl = await cmd(session, 'channellist');
+    const items = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
+    for (const ch of items) {
+      if (tryMatch(ch) && ch.cid != null) return String(ch.cid);
+    }
+  } catch (e) { /* 退化到逐个探测 */ }
   // 退化：探测 cid=1..12，匹配频道名
   for (let cid = 1; cid <= 12; cid++) {
     try {
-      const ci = await cmd('channelinfo cid=' + cid);
+      const ci = await cmd(session, 'channelinfo cid=' + cid);
       const o = (Array.isArray(ci) ? ci[0] : ci) || {};
-      if ((o.channel_name || '').trim().toLowerCase() === want) return String(cid);
+      if ((o.channel_name || '').trim().toLowerCase() === leaf || (o.channel_name || '').trim().toLowerCase() === want.toLowerCase()) return String(cid);
     } catch (e) { /* 该 cid 可能不存在，忽略 */ }
   }
   return null;
 }
 
-// ---------- SSH 连接管理 ----------
-function connect() {
+// ---------- 单会话 SSH 连接管理 ----------
+function connect(session) {
   const host = config.tsHost || 'teamspeak';
   const port = parseInt(process.env.TS_CHAT_SSH_PORT || '10022', 10);
-  console.log('[tschat][diag] 连接 TeamSpeak SSH Query：host=' + host + ' port=' + port);
-  state = 'connecting';
+  console.log('[tschat][' + session.channel + '] 连接 TeamSpeak SSH Query：host=' + host + ' port=' + port);
+  session.state = 'connecting';
   const { Client } = require('ssh2');
   const c = new Client();
-  conn = c;
+  session.conn = c;
 
   c.on('ready', () => {
     // TS6 查询接口拒绝 PTY 分配，必须以无伪终端方式打开 shell
     c.shell(false, (err, s) => {
-      if (err) { fail(err); return; }
-      stream = s;
+      if (err) { fail(session, err); return; }
+      session.stream = s;
       let buf = '';
       let bannerSeen = false;
       s.on('data', (chunk) => {
@@ -545,23 +530,23 @@ function connect() {
           if (!line) continue;
           // 必须等服务端打出 TS3 横幅后才接受命令（过早写入会被丢弃）
           if (!bannerSeen) {
-            if (/^TS3\b/.test(line)) { bannerSeen = true; bootstrap(); }
+            if (/^TS3\b/.test(line)) { bannerSeen = true; bootstrap(session); }
             continue;
           }
-          dispatchLine(line);
+          dispatchLine(session, line);
         }
       });
       s.on('close', () => {
         // 面板主动停止时 conn.end() 会触发 close，属正常流程
-        if (!started) { teardown(); return; }
-        fail(new Error('shell closed'));
+        if (!session.started) { teardownSession(session); return; }
+        fail(session, new Error('shell closed'));
       });
       s.stderr && s.stderr.on('data', () => {});
     });
   });
   c.on('error', (e) => {
-    if (!started) { teardown(); return; }
-    fail(e);
+    if (!session.started) { teardownSession(session); return; }
+    fail(session, e);
   });
 
   c.connect({
@@ -574,168 +559,80 @@ function connect() {
   });
 }
 
-let bootstrapped = false;
-let reconcileTimer = null; // 定时自检并跟随机器人频道，防止二者漂移
-let myNick = '';           // 本查询端昵称，用于从 clientlist 中定位自己
-// 点歌机器人昵称（识别它所在频道以跟随）。
-// 优先取面板/配置持久化的 ts6mgrBotNickname（可对机器人改名后配置）；TS_CHAT_BOT_NICKNAME 作古老 env 覆盖。
-// 用函数而非常量，便于面板改名后热应用（定时自检会用最新昵称重新定位）。
-function botNickname() {
-  const envOld = (process.env.TS_CHAT_BOT_NICKNAME || '').trim();
-  if (envOld) return envOld;
-  return (config.ts6mgrBotNickname || '点歌机器人').trim();
+// 会话启动：进自己的频道并订阅聊天事件（固定驻留，绝不跨频道移动）
+async function bootstrap(session) {
+  try {
+    await selectVirtualServer(session, session.channel);
+    // 昵称冲突自愈（上一次连接未干净退出时 513）
+    let nick = assistantNameFor(session.channel);
+    try {
+      await cmd(session, 'clientupdate client_nickname=' + esc(nick));
+    } catch (e) {
+      nick = nick + Math.floor(Math.random() * 90 + 10);
+      await cmd(session, 'clientupdate client_nickname=' + esc(nick));
+    }
+    session.nick = nick;
+    await joinOwnChannel(session);
+    session.state = 'listening';
+    console.log('[tschat][' + session.channel + '] 已驻留频道并监听点歌指令 (昵称=' + nick + ')');
+  } catch (e) {
+    fail(session, e);
+  }
 }
 
-// 兼容 TS3/TS6 字段命名差异（clid/client_id、cid/channel_id）
-function cidOf(x) { return x.cid != null ? x.cid : x.channel_id; }
-function clidOf(x) { return x.clid != null ? x.clid : x.client_id; }
-function findBot(items) {
-  // 优先用 ts6-manager 记录的音乐机器人 clid 精确定位（最稳），昵称只作兜底
-  const botClid = tsbridge.getBotClid();
-  if (botClid != null) {
-    const byClid = items.find((x) => String(cidOf(x)) === String(botClid));
-    if (byClid) return byClid;
+// 把本会话的查询客户端移动到自己绑定的频道（失败重试；已在则返回 id=770 视为成功）
+async function joinOwnChannel(session) {
+  const cid = await resolveChannelCid(session, session.channel);
+  if (!cid) throw new Error('找不到频道「' + session.channel + '」，请确认频道存在');
+  const me = await myInfo(session);
+  const myClid = me.clid;
+  if (!myClid) throw new Error('无法获取查询端自身 clid');
+  const cpw = (config.ts6mgrChannelPassword || '').trim();
+  let moved = false;
+  for (let attempt = 0; attempt < 3 && !moved; attempt++) {
+    try {
+      let cmdStr = 'clientmove cid=' + cid + ' clid=' + myClid;
+      if (cpw) cmdStr += ' cpw=' + cpw;
+      await cmd(session, cmdStr);
+      console.log('[tschat][' + session.channel + '] 已 clientmove 到频道 cid=' + cid + (cpw ? '（带密码）' : ''));
+      moved = true;
+    } catch (e) {
+      // error id=770 already member of channel：已在目标频道，视为成功
+      if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) { moved = true; }
+      else {
+        console.log('[tschat][' + session.channel + '] clientmove 第 ' + (attempt + 1) + ' 次失败：' + (e.message || e));
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
   }
-  return items.find((x) => x.client_nickname === botNickname())
-    || items.find((x) => x.client_nickname && x.client_nickname.includes(botNickname()));
-}
-function findMe(items) {
-  if (myNick) {
-    const m = items.find((x) => x.client_nickname === myNick)
-      || items.find((x) => x.client_nickname && String(x.client_nickname).startsWith(myNick));
-    if (m) return m;
+  if (!moved) throw new Error('clientmove 失败');
+  // 订阅聊天事件。server 全局事件只挂在第一个频道会话上，避免多助手重复应答。
+  const events = ['textchannel', 'textprivate'];
+  const firstChannel = tsbridge.configChannels()[0];
+  if (session.channel === firstChannel) events.push('textserver');
+  for (const ev of events) {
+    try { await cmd(session, 'servernotifyregister event=' + ev); }
+    catch (e) { console.log('[tschat][' + session.channel + '] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
   }
-  return items.find((x) => String(x.client_type) === '1'); // 退化：取任一 ServerQuery 客户端
 }
 
-// 取查询客户端自身的位置。ServerQuery 客户端常不在 clientlist 中露出自己，
-// 故优先用 whoami（返回 clid/cid）拿到自身的 clid，clientmove 缺它无法移动。
-async function myInfo() {
+// 取查询客户端自身的 clid（ServerQuery 客户端常不在 clientlist 中露出自己，优先 whoami）
+async function myInfo(session) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const w = await cmd('whoami');
+      const w = await cmd(session, 'whoami');
       if (w && (w.clid != null || w.cid != null)) {
         return { clid: w.clid != null ? w.clid : null, cid: w.cid != null ? w.cid : null, via: 'whoami' };
       }
     } catch (e) { /* 重试 */ }
     if (attempt < 2) await new Promise((r) => setTimeout(r, 800));
   }
-  // 兜底：从 clientlist 里找自己（ServerQuery 客户端 often 不在此列出，故可能为空）
-  try {
-    const list = await cmd('clientlist -uid');
-    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const m = findMe(items);
-    return { clid: m ? clidOf(m) : null, cid: m ? cidOf(m) : null, via: 'list' };
-  } catch (e) {
-    return { clid: null, cid: null, via: 'none' };
-  }
+  return { clid: null, cid: null, via: 'none' };
 }
 
-// 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
-// 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
-// 否则查询端停留在旧频道，收不到新频道的 !点歌 等指令。
-async function joinBotChannelBody() {
-  if (!conn) return; // 连接已断开时不操作
-  try {
-    // 先刷新机器人 clid 缓存（优先用 clid 精准定位），失败不阻断
-    try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
-    let botCid = null;
-    let botName = '';
-    let botSeen = false;
-    let botChanName = null;
-    // 取音乐机器人“当前所在频道”：优先 ts6-manager 从 TS 服务器真实客户端列表定位（权威、全可见）。
-    // 返回 { cid, name }；cid 为服务器侧权威编号（与 ServerQuery 同一台服务器，cid 一致）。
-    try {
-      const botChan = await tsbridge.getBotChannel();
-      if (botChan && botChan.cid != null) {
-        botCid = String(botChan.cid);
-        botChanName = botChan.name;
-        botName = (botChan.name || ('cid' + botChan.cid)) + '(服务端定位)';
-        botSeen = true;
-        console.log('[tschat] 服务端定位音乐机器人频道：name=' + botChan.name + ' cid=' + botChan.cid);
-      } else if (botChan && botChan.name) {
-        // 仅有频道名（兜底）：用查询端自身 channelidbyname 解析 cid
-        botChanName = botChan.name;
-        botName = botChan.name + '(ts6-manager名称)';
-        botSeen = true;
-        console.log('[tschat] ts6-manager 报告频道名（无cid）：' + botChan.name);
-      }
-    } catch (e) { /* 忽略 */ }
-    // 若服务端定位只给了频道名，用查询端自身的 channelidbyname 解析 cid（编号空间以 ServerQuery 为准）
-    if (!botCid && botChanName) {
-      const cid = await resolveCidByName(botChanName);
-      if (cid) { botCid = cid; console.log('[tschat] channelidbyname(' + botChanName + ') → cid=' + cid); }
-    }
-    // 兜底：按配置频道名解析
-    if (!botCid) {
-      const want = (config.ts6mgrChannel || '').trim();
-      if (want) {
-        const cid = await resolveCidByName(want);
-        if (cid) { botCid = cid; botName = want + '(配置频道)'; console.log('[tschat] 按配置频道名解析 ' + want + ' → cid=' + cid); }
-      }
-    }
-    const list = await cmd('clientlist -uid');
-    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const channelList = await cmd('channellist');
-    const chItems = Array.isArray(channelList) ? channelList : [channelList];
-    const me0 = await myInfo();
-    const myClid0 = me0.clid;
-    const myCid0 = me0.cid;
-    if (!botCid) {
-      // 终极兜底：用 ServerQuery 自身的 channellist 按名解析（可见性受限时可能失败）
-      const r = resolveTargetCid(items, chItems, myCid0);
-      botCid = r.cid; botName = r.name; botSeen = r.botSeen;
-    }
-    // 该 TS 服务器的 ServerQuery whoami 频道信息不可靠（会把 cid=2 报成 Default Channel、
-    // 把真实所在频道误报为 1），因此不再用 whoami 的 myCid 判断是否“已在目标频道”，
-    // 而总是发起 clientmove（服务端会校验；若本就在目标频道则返回 id=770，视为成功）。
-    // 仅 myClid（查询端自身 id）可靠，用于 clientmove 的 clid 参数。
-    const me = await myInfo();
-    const myClid = me.clid != null ? me.clid : myClid0;
-    const myCid = me.cid != null ? me.cid : myCid0;
-    console.log('[tschat] join: myNick=' + myNick + ' myClid=' + myClid + ' myCid(不可靠)=' + myCid
-      + ' botCid=' + botCid + ' botSeen=' + botSeen + ' 目标频道=' + (botName || '(未知)')
-      + ' clients=' + items.map((x) => (x.client_nickname || '?') + '@' + cidOf(x)).join(',')
-      + ' | channellist=' + JSON.stringify(chItems.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
-    if (botCid && myClid) {
-      const cpw = (config.ts6mgrChannelPassword || '').trim();
-      let moved = false;
-      for (let attempt = 0; attempt < 3 && !moved; attempt++) {
-        try {
-          let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
-          if (cpw) cmdStr += ' cpw=' + cpw;
-          await cmd(cmdStr);
-          console.log('[tschat] 已 clientmove 到频道 ' + botCid + (cpw ? '（带密码）' : ''));
-          moved = true;
-        } catch (e) {
-          // error id=770 already member of channel：说明已经在目标频道，视为成功
-          // TS 报错里空格被转义成 \s，故用 [^a-z]* 兼容（或直接匹配 id=770）
-          if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) { moved = true; console.log('[tschat] 已在频道 ' + botCid + '，无需移动'); }
-          else {
-            console.log('[tschat] clientmove 第 ' + (attempt + 1) + ' 次失败：' + (e.message || e));
-            if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
-          }
-        }
-      }
-    }
-    for (const ev of ['textchannel', 'textprivate', 'textserver']) {
-      try { await cmd('servernotifyregister event=' + ev); }
-      catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
-    }
-    if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人(' + botNickname() + ')，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
-    console.log('[tschat] 已就位频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
-  } catch (e) {
-    console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
-  }
-}
-// 串行化包装
-function joinBotChannel() { return enqueueMove(() => joinBotChannelBody()); }
-
-// 选择包含目标频道的虚拟服务器。TeamSpeak 可能有多台虚拟服务器，
-// 音乐机器人（点歌机器人）与点歌助手必须落在同一台虚拟服务器才能同频道。
-// 默认 use 1；若当前虚拟服务器里找不到目标频道，则遍历虚拟服务器找到含该频道的那台并 use 过去。
-async function selectVirtualServer(wantName) {
-  const defaultSid = (process.env.TS_CHAT_SID || config.ts6mgrSid || '1');
+// 选择包含目标频道的虚拟服务器（TeamSpeak 可能有多台；默认 use 1，找不到目标频道再遍历）
+async function selectVirtualServer(session, wantName) {
+  const defaultSid = (process.env.TS_CHAT_SID || '1');
   const leaf = (wantName || '').split('/').pop().toLowerCase();
   const matchCh = (ch) => {
     const n = (ch.channel_name || '').toLowerCase();
@@ -743,212 +640,138 @@ async function selectVirtualServer(wantName) {
   };
   if (wantName) {
     try {
-      const sl = await cmd('serverlist');
+      const sl = await cmd(session, 'serverlist');
       const servers = (Array.isArray(sl) ? sl : [sl]).filter(Boolean);
       for (const s of servers) {
         const sid = s.virtualserver_id || s.sid || s.id;
         if (!sid) continue;
         try {
-          await cmd('use ' + sid);
-          const cl = await cmd('channellist');
+          await cmd(session, 'use ' + sid);
+          const cl = await cmd(session, 'channellist');
           const chs = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
-          if (chs.some(matchCh)) { console.log('[tschat] 已切到含目标频道的虚拟服务器 sid=' + sid); return; }
+          if (chs.some(matchCh)) { console.log('[tschat][' + session.channel + '] 已切到含目标频道的虚拟服务器 sid=' + sid); return; }
         } catch (e) { /* 试下一台 */ }
       }
-      console.log('[tschat] 未找到含目标频道的虚拟服务器，回退默认 sid=' + defaultSid);
+      console.log('[tschat][' + session.channel + '] 未找到含目标频道的虚拟服务器，回退默认 sid=' + defaultSid);
     } catch (e) {
-      console.log('[tschat] 遍历虚拟服务器失败，回退默认：' + (e.message || e));
+      console.log('[tschat][' + session.channel + '] 遍历虚拟服务器失败，回退默认：' + (e.message || e));
     }
   }
-  await cmd('use ' + defaultSid);
+  await cmd(session, 'use ' + defaultSid);
 }
 
-// 跨虚拟服务器定位“点歌机器人”：优先用 ts6-manager 已知的 TS client id（最精准），
-// 其次按昵称包含 botNickname() 匹配。返回 { cid, clid, sid, uid, nick }；找不到返回 null。
-// 定位过程中会把查询端切到机器人所在的虚拟服务器（use 过去）。
-async function locateMusicBot() {
-  const targetClid = tsbridge.getBotClid();
-  try {
-    const sl = await cmd('serverlist');
-    const servers = (Array.isArray(sl) ? sl : [sl]).filter(Boolean);
-    console.log('[tschat][diag] serverlist=' + JSON.stringify(servers) + ' targetClid=' + targetClid);
-    for (const s of servers) {
-      const sid = s.virtualserver_id || s.sid || s.id;
-      if (!sid) continue;
-      try {
-        await cmd('use ' + sid);
-        const list = await cmd('clientlist -uid');
-        const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-        const cl = await cmd('channellist');
-        const chs = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
-        console.log('[tschat][diag] vs sid=' + sid + ' clients=' + JSON.stringify(items.map((x) => ({ clid: clidOf(x), nick: x.client_nickname, cid: cidOf(x) })))
-          + ' channels=' + JSON.stringify(chs.map((c) => ({ cid: cidOf(c), name: c.channel_name }))));
-        let bot = (targetClid != null) ? items.find((x) => String(clidOf(x)) === String(targetClid)) : null;
-        if (!bot) bot = items.find((x) => (x.client_nickname || '').includes(botNickname()));
-        if (bot) {
-          return { cid: cidOf(bot), clid: clidOf(bot), sid, uid: bot.client_unique_identifier, nick: bot.client_nickname };
-        }
-      } catch (e) { /* 试下一台虚拟服务器 */ }
-    }
-  } catch (e) { /* 忽略 */ }
-  return null;
+function scheduleRetry(session) {
+  if (session.retryTimer) return;
+  session.retryTimer = setTimeout(() => {
+    session.retryTimer = null;
+    if (!session.started) return;
+    connect(session);
+  }, 8000);
 }
 
-// 解析目标频道 cid：1) 已配置频道名/路径；2) 机器人昵称；3) 兜底第一个语音用户频道
-function resolveTargetCid(items, chItems, myCid) {
-  const wantName = (config.ts6mgrChannel || '').trim();
-  const bot = findBot(items);
-  const botSeen = !!bot;
-  if (wantName) {
-    const leaf = wantName.split('/').pop().toLowerCase();
-    const lower = wantName.toLowerCase();
-    const ch = chItems.find((x) => (x.channel_name || '').toLowerCase() === lower)
-      || chItems.find((x) => (x.channel_name || '').toLowerCase().endsWith(leaf));
-    if (ch) return { cid: cidOf(ch), botSeen, name: wantName };
-  }
-  if (bot) return { cid: cidOf(bot), botSeen: true, name: (bot.channel_name || bot.client_nickname || botNickname()) };
-  const voice = items.find((x) => String(x.client_type) !== '1');
-  if (voice && String(cidOf(voice)) !== String(myCid) && cidOf(voice) != null) return { cid: cidOf(voice), botSeen, name: voice.channel_name || '' };
-  return { cid: null, botSeen, name: '' };
+function fail(session, err) {
+  if (!session.started) { teardownSession(session); return; }
+  session.state = 'error';
+  console.log('[tschat][' + session.channel + '] 断开：' + (err && err.message ? err.message : err));
+  teardownConn(session);
+  scheduleRetry(session);
 }
 
-// 轻量自检：若查询端已不在机器人所在频道，则自动跟过去。
-// 解决“切换频道后过一阵二者不在同一频道”的问题（查询端被服务器移动/重连错位）。
-async function ensureInBotChannelBody() {
-  if (state !== 'listening' || !conn) return;
-  try {
-    try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
-    // 优先用 ts6-manager（完整可见性）取音乐机器人当前频道 cid
-    let botCid = null;
-    let botChan = null;
-    try { botChan = await tsbridge.getBotChannel(); } catch (e) { /* 忽略 */ }
-    if (botChan && botChan.cid != null) botCid = botChan.cid;
-    if (!botCid) {
-      const located = await locateMusicBot();
-      if (located) botCid = located.cid;
-    }
-    if (!botCid) {
-      const list = await cmd('clientlist -uid');
-      const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-      const bot = findBot(items);
-      if (bot) botCid = cidOf(bot);
-    }
-    const me0 = await myInfo();
-    const myClid0 = me0.clid;
-    const myCid0 = me0.cid;
-    // 该 TS 服务器的 ServerQuery whoami 频道信息不可靠，不再据此判断是否已在目标频道，
-    // 总是发起 clientmove（服务端校验；已在该频道则返回 id=770，视为成功）。
-    const me = await myInfo();
-    const myClid = me.clid != null ? me.clid : myClid0;
-    if (botCid && myClid) {
-      try {
-        let cmdStr = 'clientmove cid=' + botCid + ' clid=' + myClid;
-        const cpw = (config.ts6mgrChannelPassword || '').trim();
-        if (cpw) cmdStr += ' cpw=' + cpw;
-        await cmd(cmdStr);
-        console.log('[tschat] 检测到与机器人频道不一致，已重新移动到 ' + botCid);
-      } catch (e) {
-        if (/id=770|already[^a-z]*member/i.test(e.message || String(e))) console.log('[tschat] 已在频道 ' + botCid + '（自动跟随）');
-        else console.log('[tschat] 自动跟随移动失败：' + (e.message || e));
-      }
-    }
-    // 重新订阅聊天事件，防止订阅被服务器静默取消导致收不到 !点歌
-    for (const ev of ['textchannel', 'textprivate', 'textserver']) {
-      try { await cmd('servernotifyregister event=' + ev); }
-      catch (e) { /* 忽略 */ }
-    }
-  } catch (e) { /* 忽略瞬时错误 */ }
-}
-function ensureInBotChannel() { return enqueueMove(() => ensureInBotChannelBody()); }
-async function bootstrap() {
-  try {
-    await selectVirtualServer((config.ts6mgrChannel || '').trim());
-    // 昵称冲突自愈（上一次连接未干净退出时 513）
-    const baseNick = process.env.TS_CHAT_NICKNAME || '点歌助手';
-    let nick = baseNick;
-    try {
-      await cmd('clientupdate client_nickname=' + esc(nick));
-    } catch (e) {
-      nick = baseNick + Math.floor(Math.random() * 90 + 10);
-      await cmd('clientupdate client_nickname=' + esc(nick));
-    }
-    // 找到机器人所在频道并移过去（查询客户端只能收到自己所在频道的聊天）
-    myNick = nick;
-    await joinBotChannel();
-    bootstrapped = true;
-    state = 'listening';
-    // 启动频道一致性自检：每 30s 检测一次，若与机器人不在同一频道则自动跟过去
-    if (reconcileTimer) clearInterval(reconcileTimer);
-    reconcileTimer = setInterval(() => { ensureInBotChannel(); }, 30000);
-    console.log('[tschat] 已加入频道并监听 !点歌 命令 (昵称=' + nick + ')');
-  } catch (e) {
-    fail(e);
-  }
-}
-
-function scheduleRetry() {
-  if (retryTimer) return;
-  retryTimer = setTimeout(() => { retryTimer = null; connect(); }, 8000);
-}
-
-function fail(err) {
-  if (!started) { teardown(); return; }
-  state = 'error';
-  console.log('[tschat] 断开：' + (err && err.message ? err.message : err));
-  teardown();
-  if (started && enabled()) scheduleRetry();
-}
-
-// 立即停掉监听（面板关闭开关时调用）
-function stop() {
-  started = false;
-  state = 'stopped';
-  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  teardown();
-}
-
-function teardown() {
-  while (pending.length) {
-    const p = pending.shift();
+function teardownConn(session) {
+  while (session.pending.length) {
+    const p = session.pending.shift();
     clearTimeout(p.timer);
     try { p.reject(new Error('已停止')); } catch (e) {}
   }
-  try { conn && conn.end(); } catch (e) {}
-  conn = null; stream = null; bootstrapped = false;
-  if (reconcileTimer) { clearInterval(reconcileTimer); reconcileTimer = null; }
+  try { session.conn && session.conn.end(); } catch (e) {}
+  session.conn = null;
+  session.stream = null;
 }
 
-// 面板保存配置后调用：按最新配置启/停/重连
-let appliedSig = null; // 当前连接使用的凭据指纹
-function applyConfig() {
-  const want = enabled();
-  const sig = config.tsQueryAdminPassword || '';
-  if (!want) {
-    if (started) stop();
-    console.log('[tschat] 已按配置停止');
-    return;
+function teardownSession(session) {
+  session.started = false;
+  session.state = 'stopped';
+  if (session.retryTimer) { clearTimeout(session.retryTimer); session.retryTimer = null; }
+  teardownConn(session);
+}
+
+// ---------- 多会话编排 ----------
+// 面板保存配置后调用：按最新频道列表增删会话（密码变化时全部重建）
+let appliedPassword = null;
+
+function syncSessions() {
+  const channels = tsbridge.configChannels();
+  // 停掉不再配置的频道会话
+  for (const [ch, s] of [...sessions]) {
+    if (!channels.includes(ch)) {
+      teardownSession(s);
+      sessions.delete(ch);
+      console.log('[tschat] 频道「' + ch + '」已从部署列表移除，点歌助手停止');
+    }
   }
-  // 需要启动，或密码已变化 → 重建连接
-  if (started && appliedSig !== sig) {
-    console.log('[tschat] 查询密码变更，重建连接');
-    teardown();
-    started = false;
-    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  }
-  if (!started) {
-    appliedSig = sig;
-    start();
+  // 为新频道创建会话（错峰连接，避免同时大量查询登录触发洪水限制）
+  let delay = 0;
+  for (const ch of channels) {
+    if (sessions.has(ch)) continue;
+    const s = createSession(ch);
+    sessions.set(ch, s);
+    setTimeout(() => {
+      if (sessions.get(ch) === s && s.started && enabled()) connect(s);
+    }, delay);
+    delay += 1500;
+    s.started = true;
+    s.state = 'connecting';
+    console.log('[tschat] 将为频道「' + ch + '」启动点歌助手（' + assistantNameFor(ch) + '）');
   }
 }
 
 function start() {
-  if (started) return;
   if (!enabled()) {
-    console.log('[tschat] 未启用（需设置查询密码；可在点歌页「频道聊天点歌」中配置）');
+    console.log('[tschat] 未启用（需设置查询密码；可在点歌页「机器人管理 → 点歌助手」中配置）');
     return;
   }
-  started = true;
-  connect();
+  appliedPassword = config.tsQueryAdminPassword || '';
+  syncSessions();
+}
+
+function stop() {
+  appliedPassword = null;
+  for (const s of sessions.values()) teardownSession(s);
+  sessions.clear();
+  console.log('[tschat] 已按配置停止');
+}
+
+// 面板保存配置后调用：按最新配置启/停/增删会话
+function applyConfig() {
+  if (!enabled()) {
+    if (sessions.size) stop();
+    console.log('[tschat] 已按配置停止');
+    return;
+  }
+  const pwd = config.tsQueryAdminPassword || '';
+  if (appliedPassword !== null && appliedPassword !== pwd) {
+    console.log('[tschat] 查询密码变更，重建全部点歌助手连接');
+    stop();
+  }
+  start();
+}
+
+// 运行状态（面板展示）：state 为聚合状态，sessions 为各频道明细
+function getState() {
+  const list = [...sessions.values()].map((s) => ({ channel: s.channel, state: s.state, nick: s.nick }));
+  let state = 'stopped';
+  if (!enabled()) state = 'stopped';
+  else if (!list.length) state = 'stopped';
+  else if (list.some((s) => s.state === 'error')) state = 'error';
+  else if (list.some((s) => s.state === 'connecting')) state = 'connecting';
+  else if (list.every((s) => s.state === 'listening')) state = 'listening';
+  else state = 'connecting';
+  return {
+    state,
+    enabled: enabled(),
+    hasPassword: !!config.tsQueryAdminPassword,
+    sessions: list,
+  };
 }
 
 module.exports = {
@@ -956,9 +779,7 @@ module.exports = {
   stop,
   applyConfig,
   enabled,
-  // 机器人切换频道后调用：把聊天点歌查询端也挪到新频道（否则收不到指令）
-  rejoinChannel: joinBotChannel,
-  getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword }),
+  getState,
   // 测试钩子（非公开接口）
-  _internal: { extractSongId, parseParams, esc, unesc, handleRequest, splitRows, isRowSeparator },
+  _internal: { extractSongId, parseParams, esc, unesc, handleRequest, splitRows, isRowSeparator, assistantNameFor },
 };

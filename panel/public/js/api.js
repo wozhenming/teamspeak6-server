@@ -113,7 +113,6 @@ const API = (function () {
     musicTsDeleteBot: () => request('DELETE', '/api/music/ts-bot/bot'),
     musicTsUnlink: () => request('POST', '/api/music/ts-bot/unlink'),
     musicTsChannels: () => request('GET', '/api/music/ts-bot/channels'),
-    musicTsSwitchChannel: (channel) => request('POST', '/api/music/ts-bot/switch-channel', { channel }),
     musicTsChatStatus: () => request('GET', '/api/music/ts-bot/chat/status'),
 
     // 图片代理：返回同源 URL，绕过网易云外链防盗链 / 混合内容限制

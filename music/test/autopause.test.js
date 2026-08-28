@@ -134,21 +134,14 @@ async function main() {
   await sleep(50);
   check('有人在且播放中 → 保持播放', player.get().playing === true, player.get());
 
-  // 场景5：clients 端点不可用 → channellist 兜底（total_clients 含机器人，减 1）
+  // 场景5：clients 端点不可用 → 无法判断，保持现状（不误暂停也不误恢复）
   clientsFail = true;
-  fakeChannelTotal = 1; // 仅机器人自身 → 视为无人
   await maybeAutoPauseEmpty();
   await sleep(50);
-  check('兜底：频道计数 1(仅机器人) → 自动暂停', player.get().playing === false, player.get());
-
-  // 场景6：兜底路径下有人进入 → 自动恢复
-  fakeChannelTotal = 2;
-  await maybeAutoPauseEmpty();
-  await sleep(50);
-  check('兜底：有人进入 → 自动恢复', player.get().playing === true, player.get());
+  check('clients 端点不可用 → 保持现状', player.get().playing === true, player.get());
   clientsFail = false;
 
-  // 场景7：autoPauseEmpty 关闭时，即便无人也不暂停
+  // 场景6：autoPauseEmpty 关闭时，即便无人也不暂停
   const { config } = require(path.resolve(__dirname, '..', 'src/config.js'));
   config.autoPauseEmpty = false;
   fakeUsers = 0;
