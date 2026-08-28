@@ -85,8 +85,9 @@ function generateSilence() {
   return new Promise((resolve) => {
     const chunks = [];
     const ff = spawn('ffmpeg', [
-      '-hide_banner', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-      '-acodec', 'libmp3lame', '-ab', '32k', '-t', '2', '-f', 'mp3', '-',
+      '-hide_banner', '-f', 'lavfi', '-i', 'anullsrc=r=' + config.audioRate + ':cl=stereo',
+      '-acodec', config.audioCodec, '-b:a', '32k', '-ar', String(config.audioRate), '-t', '2',
+      '-f', config.audioCodec === 'libopus' ? 'opus' : 'mp3', '-',
     ], { stdio: ['ignore', 'pipe', 'ignore'] });
     ff.stdout.on('data', (c) => chunks.push(c));
     ff.on('error', () => resolve(null));
@@ -258,7 +259,7 @@ app.get('/api/stream', async (req, res) => {
         if (closed) break;
         const ffArgs = ['-re', '-protocol_whitelist', 'file,http,https,tcp,pipe'];
         if (startPos > 0) ffArgs.push('-ss', String(startPos));
-        ffArgs.push('-i', input, '-acodec', 'libmp3lame', '-ab', '128k', '-ar', '44100', '-f', 'mp3', '-');
+        ffArgs.push('-i', input, '-acodec', config.audioCodec, '-b:a', config.audioBitrate, '-ar', String(config.audioRate), '-ac', String(config.audioChannels), '-f', config.audioCodec === 'libopus' ? 'opus' : 'mp3', '-');
         const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
         const revAtStart = player.get().rev;
         let errTail = '';

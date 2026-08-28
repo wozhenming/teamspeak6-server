@@ -45,6 +45,13 @@ const config = {
     ? process.env.STREAM_TOKEN_ENABLED !== '0'
     : true,
   streamToken: env('STREAM_TOKEN', ''),
+  // 电台流编码质量（music-bot 输出给 ts6-manager 的“源音频”；ts6-manager 会再编码为 Opus 推入 TS，
+  // 因此源质量越高，最终 TS 音质越好）。默认 320k / 48k / 立体声；
+  // 如服务器出网带宽吃紧可调低比特率；想进一步可把 STREAM_AUDIO_CODEC 设为 libopus（效率更高）。
+  audioCodec: env('STREAM_AUDIO_CODEC', 'libmp3lame'),
+  audioBitrate: env('STREAM_AUDIO_BITRATE', '320k'),
+  audioRate: parseInt(env('STREAM_AUDIO_RATE', '48000'), 10),
+  audioChannels: parseInt(env('STREAM_AUDIO_CHANNELS', '2'), 10),
   // TeamSpeak 服务器连接信息（交由 ts6-manager 管理，自动建连）
   tsHost: env('TS_HOST', 'teamspeak'),
   tsWebqueryPort: parseInt(env('TS_WEBQUERY_PORT', '10080'), 10),
