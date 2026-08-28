@@ -669,8 +669,48 @@ async function resumeRadio() {
 
 module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
 
+// 音乐机器人的稳定身份：客户端唯一标识（UID，无法被改名伪造）。首次按昵称识别后缓存，
+// 之后优先用 UID 匹配，避免“有人把昵称改成点歌机器人”导致的误跟随。
+let musicBotUid = null;
+function clientUid(cl) {
+  return cl.client_unique_identifier || cl.uid || cl.unique_identifier || cl.clientUid || cl.client_unique_id || null;
+}
+function clientNick(cl) {
+  return (cl.nickname || cl.client_nickname || cl.client_nick || '') + '';
+}
+// 在客户端列表里识别音乐机器人：优先用缓存的 UID；否则按昵称，但要求带音乐机器人专属标记
+// （♪），以免与“仅叫点歌机器人”的普通用户混淆。targetNick 为 ts6-manager 记录的机器人昵称。
+function findMusicBot(list, targetNick) {
+  if (!Array.isArray(list) || !list.length) return null;
+  // 0) 已缓存 UID：优先按 UID 匹配（不可能被改名伪造）
+  if (musicBotUid) {
+    const byUid = list.find((cl) => clientUid(cl) && clientUid(cl) === musicBotUid);
+    if (byUid) return byUid;
+  }
+  const base = (targetNick || '点歌机器人') + '';
+  // 1) 同时含机器人名 + 专属标记（♪）：精准锁定真正音乐机器人，排除仅叫“点歌机器人”的普通用户
+  const marked = list.find((cl) => {
+    const n = clientNick(cl);
+    return n.includes(base) && n.includes('♪');
+  });
+  if (marked) return marked;
+  // 2) 专属全名精确匹配（如 “点歌机器人 ♪ 点歌机器人”），不含裸 base
+  const exact = list.find((cl) => {
+    const n = clientNick(cl);
+    return n === ('♪ ' + base) || n === (base + ' ♪ 点歌机器人') || n === ('点歌机器人 ♪ 点歌机器人');
+  });
+  if (exact) return exact;
+  // 3) 兜底：仅当列表里“没有任何带 ♪ 的机器人名”时，才退回裸昵称子串匹配（可能误匹配，但保证可用）
+  const anyMarked = list.some((cl) => {
+    const n = clientNick(cl);
+    return n.includes(base) && n.includes('♪');
+  });
+  if (!anyMarked) return list.find((cl) => clientNick(cl).includes(base));
+  return null;
+}
+
 // 从 TS 服务器真实客户端列表取音乐机器人“当前所在”频道（权威、全可见）。
-// ts6-manager 用 WebQuery 能拿到完整 clientlist；从中按昵称找到音乐机器人，读出它所在的 cid。
+// ts6-manager 用 WebQuery 能拿到完整 clientlist；从中识别音乐机器人，读出它所在的 cid。
 // 返回 { cid, name } 或 null。
 async function getBotCurrentChannelServerSide() {
   try {
@@ -689,22 +729,23 @@ async function getBotCurrentChannelServerSide() {
       if (r.status === 200) clients = toArray(r.json);
     } catch (e) { /* 忽略 */ }
     console.log('[tsbridge][botChan] clients端点返回 ' + clients.length + ' 个客户端: '
-      + JSON.stringify(clients.map((cl) => ({ n: cl.nickname || cl.client_nickname, cid: cl.cid || cl.channel_id || cl.channelId }))));
-    const findBot = (list) => list.find((cl) => (((cl.nickname || cl.client_nickname) || '').includes('点歌机器人')))
-      || list.find((cl) => ((cl.nickname || cl.client_nickname) || '') === nick);
-    let bot = findBot(clients);
+      + JSON.stringify(clients.map((cl) => ({ n: clientNick(cl), cid: cl.cid || cl.channel_id || cl.channelId }))));
+    let bot = findMusicBot(clients, nick);
+    // 识别成功后缓存其 UID，后续优先按 UID 匹配（抗改名）
+    if (bot) { const u = clientUid(bot); if (u) musicBotUid = u; }
     let cid = null;
     if (bot) {
       cid = bot.cid != null ? bot.cid : (bot.channel_id != null ? bot.channel_id : (bot.channelId != null ? bot.channelId : null));
     }
-    // 方法B：遍历频道，找含该昵称客户端的频道（部分实现把客户端挂在频道对象里）
+    // 方法B：遍历频道，找含音乐机器人的频道（部分实现把客户端挂在频道对象里）
     if (cid == null) {
       try {
         const chs = await getChannels(t, scId);
         for (const ch of chs) {
           const raw = ch.clientsRaw;
           if (Array.isArray(raw) && raw.length) {
-            if (findBot(raw)) { cid = ch.id; break; }
+            const b = findMusicBot(raw, nick);
+            if (b) { cid = ch.id; if (clientUid(b)) musicBotUid = clientUid(b); break; }
           }
         }
       } catch (e) { /* 忽略 */ }
