@@ -564,8 +564,19 @@ async function joinBotChannelBody() {
   try {
     // 先刷新机器人 clid 缓存（优先用 clid 精准定位），失败不阻断
     try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
-    // 确保位于含目标频道的虚拟服务器（音乐机器人可能在非 1 号虚拟服务器）
-    await selectVirtualServer((config.ts6mgrChannel || '').trim());
+    let botCid = null;
+    let botName = '';
+    let botSeen = false;
+    // 优先：直接按“点歌机器人”在 TS 里的 client id / UID / 昵称，跨虚拟服务器定位它所在的频道，
+    // 不再依赖频道名与配置——点歌助手只要跟随机器人即可（用户要求按 UID 判断）。
+    const located = await locateMusicBot();
+    if (located) {
+      botCid = located.cid; botName = located.nick + '(按clientid定位)'; botSeen = true;
+      console.log('[tschat] 已按 client id 定位点歌机器人：clid=' + located.clid + ' 频道cid=' + located.cid + ' 虚拟服务器sid=' + located.sid);
+    } else {
+      // 兜底：按配置频道名（跨虚拟服务器扫描）
+      await selectVirtualServer((config.ts6mgrChannel || '').trim());
+    }
     const list = await cmd('clientlist -uid');
     const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
     const channelList = await cmd('channellist');
@@ -573,24 +584,22 @@ async function joinBotChannelBody() {
     const me0 = await myInfo();
     const myClid0 = me0.clid;
     const myCid0 = me0.cid;
-    // 关键：ServerQuery 的频道 id 与 ts6-manager 的频道 id 是两套不同的编号空间。
-    // 查询端 clientmove 必须用「ServerQuery 自己的 channellist」按频道名解析出的 cid，
-    // 直接用 ts6-manager 的 id 会指向错误的频道（报 already member 或挪错房间）。
-    let botCid = null;
-    let botName = '';
-    let botSeen = false;
-    const r = resolveTargetCid(items, chItems, myCid0);
-    botCid = r.cid; botName = r.name; botSeen = r.botSeen;
     if (!botCid) {
-      // 退回：用 ts6-manager 解析（注意其 id 空间可能不同，仅作兜底）
-      try {
-        const channels = await tsbridge.listChannels();
-        const want = (config.ts6mgrChannel || '').trim().toLowerCase();
-        const leaf = want.split('/').pop();
-        const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
-          || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
-        if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
-      } catch (e) { /* 忽略 */ }
+      // 关键：ServerQuery 的频道 id 与 ts6-manager 的频道 id 是两套不同的编号空间。
+      // 查询端 clientmove 必须用「ServerQuery 自己的 channellist」按频道名解析出的 cid。
+      const r = resolveTargetCid(items, chItems, myCid0);
+      botCid = r.cid; botName = r.name; botSeen = r.botSeen;
+      if (!botCid) {
+        // 退回：用 ts6-manager 解析（注意其 id 空间可能不同，仅作兜底）
+        try {
+          const channels = await tsbridge.listChannels();
+          const want = (config.ts6mgrChannel || '').trim().toLowerCase();
+          const leaf = want.split('/').pop();
+          const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
+            || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
+          if (hit) { botCid = hit.id; botName = hit.path || hit.name; botSeen = true; }
+        } catch (e) { /* 忽略 */ }
+      }
     }
     // 移动前再读一次自身位置（消除并发调用间读到的过期 myCid）
     const me = await myInfo();
@@ -669,6 +678,32 @@ async function selectVirtualServer(wantName) {
   await cmd('use ' + defaultSid);
 }
 
+// 跨虚拟服务器定位“点歌机器人”：优先用 ts6-manager 已知的 TS client id（最精准），
+// 其次按昵称包含 BOT_NAME 匹配。返回 { cid, clid, sid, uid, nick }；找不到返回 null。
+// 定位过程中会把查询端切到机器人所在的虚拟服务器（use 过去）。
+async function locateMusicBot() {
+  const targetClid = tsbridge.getBotClid();
+  try {
+    const sl = await cmd('serverlist');
+    const servers = (Array.isArray(sl) ? sl : [sl]).filter(Boolean);
+    for (const s of servers) {
+      const sid = s.virtualserver_id || s.sid || s.id;
+      if (!sid) continue;
+      try {
+        await cmd('use ' + sid);
+        const list = await cmd('clientlist -uid');
+        const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+        let bot = (targetClid != null) ? items.find((x) => String(clidOf(x)) === String(targetClid)) : null;
+        if (!bot) bot = items.find((x) => (x.client_nickname || '').includes(BOT_NAME));
+        if (bot) {
+          return { cid: cidOf(bot), clid: clidOf(bot), sid, uid: bot.client_unique_identifier, nick: bot.client_nickname };
+        }
+      } catch (e) { /* 试下一台虚拟服务器 */ }
+    }
+  } catch (e) { /* 忽略 */ }
+  return null;
+}
+
 // 解析目标频道 cid：1) 已配置频道名/路径；2) 机器人昵称；3) 兜底第一个语音用户频道
 function resolveTargetCid(items, chItems, myCid) {
   const wantName = (config.ts6mgrChannel || '').trim();
@@ -693,25 +728,19 @@ async function ensureInBotChannelBody() {
   if (state !== 'listening' || !conn) return;
   try {
     try { await tsbridge.refreshBotClid(); } catch (e) { /* 忽略 */ }
-    const list = await cmd('clientlist -uid');
-    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
-    const me0 = await myInfo();
-    const myClid0 = me0.clid;
-    const myCid0 = me0.cid;
-    // 优先用 ts6-manager（完整可见性）按已配置频道名解析目标 cid，避免 ServerQuery 客户端看不到机器人/频道
+    // 优先按 client id / UID 跨虚拟服务器定位点歌机器人
     let botCid = null;
-    try {
-      const channels = await tsbridge.listChannels();
-      const want = (config.ts6mgrChannel || '').trim().toLowerCase();
-      const leaf = want.split('/').pop();
-      const hit = channels.find((c) => (c.path || c.name || '').toLowerCase() === want)
-        || channels.find((c) => (c.path || c.name || '').toLowerCase().endsWith(leaf));
-      if (hit) botCid = hit.id;
-    } catch (e) { /* 退回 clientlist 解析 */ }
+    const located = await locateMusicBot();
+    if (located) botCid = located.cid;
     if (!botCid) {
+      const list = await cmd('clientlist -uid');
+      const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
       const bot = findBot(items);
       if (bot) botCid = cidOf(bot);
     }
+    const me0 = await myInfo();
+    const myClid0 = me0.clid;
+    const myCid0 = me0.cid;
     // 移动前再读一次自身位置（消除并发调用间读到的过期 myCid）
     const me = await myInfo();
     const myClid = me.clid != null ? me.clid : myClid0;
