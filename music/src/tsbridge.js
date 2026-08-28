@@ -377,9 +377,66 @@ let watchdogTimer = null;
 let switching = null;        // 串行化 switchChannel，避免来回快速切换并发 restart 把机器人搞丢
 let switchPendingChannel = null; // 以最后一次切换请求为准（最新胜利）
 
-// 取机器人所在频道的“在线客户端数”（含机器人自身）。依赖 ts6-manager 的频道列表。
-// 返回数字；无法判断（未配置频道/接口缺字段）时返回 null，调用方应忽略。
+// ---------- 频道在线人数统计（供“频道无人自动暂停”使用） ----------
+// 注意：ServerQuery 客户端（serveradmin / 点歌助手）会 clientmove 进机器人所在频道并常驻，
+// 但它们收不到语音、不是“人”。此前用 channellist 的 total_clients 判断，计数永远 ≥2
+// （机器人+点歌助手），导致“频道无人自动暂停/有人自动恢复”从未生效。
+const clidOfClient = (cl) => cl.clid != null ? cl.clid : (cl.client_id != null ? cl.client_id : (cl.clientId != null ? cl.clientId : null));
+const cidOfClient = (cl) => cl.cid != null ? cl.cid : (cl.channel_id != null ? cl.channel_id : (cl.channelId != null ? cl.channelId : null));
+const nickOfClient = (cl) => cl.nickname || cl.client_nickname || cl.name || '';
+
+function isQueryClient(cl) {
+  const t = cl.client_type != null ? cl.client_type
+    : (cl.clientType != null ? cl.clientType : (cl.type != null ? cl.type : null));
+  if (t != null) return String(t) === '1'; // TS ServerQuery：client_type=1（语音客户端为 0）
+  // 个别实现不回传 client_type 时按已知查询端昵称兜底（点歌助手可能带随机数字后缀）
+  const n = String(nickOfClient(cl) || '');
+  return n === 'serveradmin' || /^点歌助手/.test(n);
+}
+
+// 从 ts6-manager 的 clients 端点统计“机器人所在频道的真实语音用户数”
+// （排除机器人自身与所有 ServerQuery 客户端）。返回数字；无法判断返回 null。
+async function countRealVoiceUsers() {
+  const c = cfg();
+  try {
+    const token = await getToken();
+    const serverConfigId = await ensureServer(token, c);
+    const sid = await getVirtualServerId(token, serverConfigId);
+    const r = await authFetch('GET', '/api/servers/' + serverConfigId + '/vs/' + sid + '/clients', token);
+    if (r.status !== 200) return null;
+    const j = r.json;
+    const clients = Array.isArray(j) ? j
+      : (j && Array.isArray(j.data)) ? j.data
+        : (j && j.data && Array.isArray(j.data.clients)) ? j.data.clients
+          : (j && Array.isArray(j.clients)) ? j.clients : [];
+    if (!clients.length) return null; // 连客户端列表都没有，无从判断
+    // 先定位机器人所在频道：clid 缓存优先（不会被同名用户冒充），昵称兜底
+    let bot = null;
+    if (botTsClid != null) bot = clients.find((cl) => String(clidOfClient(cl)) === String(botTsClid));
+    if (!bot) {
+      const bn = botNickname();
+      bot = clients.find((cl) => nickOfClient(cl) === bn)
+        || clients.find((cl) => String(nickOfClient(cl) || '').includes(bn));
+    }
+    if (!bot || cidOfClient(bot) == null) return null; // 机器人不在频道里，维持现状
+    const botCid = String(cidOfClient(bot));
+    const botClid = clidOfClient(bot) != null ? String(clidOfClient(bot)) : null;
+    return clients.filter((cl) =>
+      String(cidOfClient(cl)) === botCid
+      && (botClid == null || String(clidOfClient(cl)) !== botClid)
+      && !isQueryClient(cl)
+    ).length;
+  } catch (e) {
+    return null;
+  }
+}
+
+// 取机器人所在频道的“真实语音用户数”（不含机器人自身与 ServerQuery 客户端）。
+// 优先走 clients 端点精确统计；不可用时退回 channellist 计数（total_clients 含机器人，减 1 近似，
+// 该兜底无法剔除 Query 客户端，仅作降级）。返回数字；无法判断时返回 null，调用方应忽略。
 async function getChannelClientCount() {
+  const users = await countRealVoiceUsers();
+  if (users != null) return users;
   const c = cfg();
   const path = (config.ts6mgrChannel || c.channel || '').trim();
   if (!path) return null;
@@ -388,21 +445,20 @@ async function getChannelClientCount() {
     const serverConfigId = await ensureServer(token, c);
     const channels = await getChannels(token, serverConfigId);
     const ch = channels.find((x) => x.path === path) || channels.find((x) => x.name === path);
-    if (!ch) return null;
-    return ch.clients == null ? null : ch.clients;
+    if (!ch || ch.clients == null) return null;
+    return Math.max(0, ch.clients - 1);
   } catch (e) {
     return null;
   }
 }
 
-// 频道无人（仅机器人自身）时自动暂停；有人进入且此前是“因无人暂停”的，则自动恢复。
+// 频道内没有真实语音用户时自动暂停；有人进入且此前是“因无人暂停”的，则自动恢复。
 async function maybeAutoPauseEmpty() {
   if (config.autoPauseEmpty === false) return;
   const count = await getChannelClientCount();
   if (count == null) return; // 无法判断则维持现状
   const playing = !!player.get().playing;
-  if (count <= 1) {
-    // 频道内无人（total_clients 含机器人自身，仅机器人时=1；部分实现不含则=0）
+  if (count === 0) {
     if (playing && !autoPausedByEmpty) {
       player.pause();
       autoPausedByEmpty = true;
