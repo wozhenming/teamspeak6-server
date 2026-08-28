@@ -387,16 +387,22 @@ function stopWatchdog() {
 async function linkImpl() {
   // 生成/恢复机器人前，确保电台流对外地址已正确解析（公网、非内网）。
   // 启动时的自动探测可能偶发失败，这里再试一次；仍失败会抛出清晰错误而非被 ts6-manager 拒掉。
+  console.log('[tsbridge] link: 步骤1/6 确保电台流公网地址…');
   await ensureStreamPublicUrl();
   const c = cfg();
+  console.log('[tsbridge] link: 步骤2/6 获取 ts6-manager token（' + c.url + '）');
   const token = await getToken();
+  console.log('[tsbridge] link: 步骤3/6 确保 TS 连接(serverConfig)…');
   const serverConfigId = await ensureServer(token, c);
+  console.log('[tsbridge] link: 步骤4/6 确保音乐机器人（serverConfig=' + serverConfigId + '）');
   const botId = await ensureBot(token, serverConfigId);
   const stationId = await ensureStation(token, serverConfigId);
 
+  console.log('[tsbridge] link: 步骤5/6 启动机器人 botId=' + botId);
   await authFetch('POST', '/api/music-bots/' + botId + '/start', token);
   await refreshBotClid(token); // 记录机器人在 TS 里的 client id，供查询端定位
   // 等 bot 连接上频道后再播放电台（避免 “Bot is not connected”）
+  console.log('[tsbridge] link: 步骤6/6 等待机器人连接频道…');
   await waitBotConnected(token, botId);
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
   if (play.status !== 200) {

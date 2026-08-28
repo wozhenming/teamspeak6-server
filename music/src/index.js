@@ -353,7 +353,12 @@ app.get('/api/ts-bot/chat/status', (req, res) => {
   ok(res, tschat.getState());
 });
 app.post('/api/ts-bot/link', async (req, res) => {
-  try { ok(res, await tsbridge.link()); } catch (e) { fail(res, 502, 'TS_LINK_FAIL', e.message); }
+  // link() 可能耗时较长（等待机器人连接最长 25s+），若同步等待会被反向代理超时断开（表现为“服务器 hangup”）。
+  // 改为异步执行：立即返回，真正结果通过 /api/ts-bot/status 查看。
+  res.json({ ok: true, pending: true, message: '正在连接/重建机器人，请稍后用「刷新状态」查看结果' });
+  tsbridge.link()
+    .then(() => console.log('[ts-bot] 重建/连接完成'))
+    .catch((e) => console.log('[ts-bot] 重建/连接失败: ' + (e && e.message)));
 });
 app.post('/api/ts-bot/unlink', async (req, res) => {
   try { ok(res, await tsbridge.unlink()); } catch (e) { fail(res, 502, 'TS_UNLINK_FAIL', e.message); }

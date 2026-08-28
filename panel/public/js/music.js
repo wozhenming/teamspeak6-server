@@ -593,11 +593,11 @@ TSPages.music = async function () {
       if (!ch) { TSUtils.toast('请先选择频道', 'error'); return; }
       if (!key) { TSUtils.toast('请先填写 TS API Key', 'error'); return; }
       TSUtils.toast('正在生成机器人并连接 TeamSpeak…', 'success');
-      // 保存频道与 Key，再自动建连（后端自动创建管理员/TS 连接/机器人并推流）
+      // 保存频道与 Key，再自动建连（后端异步执行，最长可能 25s+，避免代理超时）
       await API.musicTsSaveConfig({ ts6mgrChannel: ch, tsApiKey: key });
-      const r = await API.musicTsLink();
-      TSUtils.toast('已连接：bot #' + r.botId, 'success');
-      refreshTsStatus();
+      await API.musicTsLink();
+      TSUtils.toast('已发起连接，请稍后用「刷新状态」查看结果', 'success');
+      setTimeout(refreshTsStatus, 8000);
     } catch (e) { TSUtils.toast('生成失败：' + e.message, 'error'); }
   };
   $('btn-ts-unlink').onclick = async () => {
@@ -620,10 +620,9 @@ TSPages.music = async function () {
   };
   $('btn-bot-relink').onclick = async () => {
     try {
-      TSUtils.toast('正在重新连接 / 重建机器人…', 'success');
+      TSUtils.toast('已发起重建，请稍后点「刷新状态」查看结果', 'success');
       await API.musicTsLink();
-      TSUtils.toast('已重新连接 / 重建机器人', 'success');
-      refreshTsStatus();
+      setTimeout(refreshTsStatus, 8000);
     } catch (e) { TSUtils.toast('重建失败：' + e.message, 'error'); }
   };
   $('btn-bot-delete').onclick = async () => {
