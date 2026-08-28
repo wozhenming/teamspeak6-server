@@ -63,6 +63,28 @@ function unesc(v) {
     .replace(/\\p/g, '|')
     .replace(/\\\\/g, '\\');
 }
+// 判断某位置的 '|' 是否为“行分隔符”而不是被反斜杠转义的 \p（原义管道符）。
+// 只有前面反斜杠数量为偶数时才是真正的分隔符。
+function isRowSeparator(line, idx) {
+  let bs = 0, i = idx - 1;
+  while (i >= 0 && line[i] === '\\') { bs++; i--; }
+  return bs % 2 === 0;
+}
+// TS6 ServerQuery 会把多条结果行用 '|' 拼在同一行返回（如 channellist/clientlist/serverlist），
+// 单行 parseParams 会把它们合并成一个错乱对象（字段跨行混搭、仅留最后一行值），导致点歌助手
+// 无法正确定位点歌机器人所在频道。这里先把一行按未转义的 '|' 拆成多行，再逐行解析。
+function splitRows(line) {
+  const rows = [];
+  let start = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '|' && isRowSeparator(line, i)) {
+      rows.push(line.slice(start, i));
+      start = i + 1;
+    }
+  }
+  rows.push(line.slice(start));
+  return rows.filter((r) => r.length > 0);
+}
 // 解析一行 notifytextmessage key=value key="v v" ... 参数
 function parseParams(line) {
   const out = {};
@@ -70,6 +92,12 @@ function parseParams(line) {
   let m;
   while ((m = re.exec(line))) out[m[1]] = unesc(m[3] != null ? m[3] : m[2]);
   return out;
+}
+// 把一行 ServerQuery 数据行解析成一个对象；若该行是 '|' 拼接的多行则返回对象数组
+function rowsOrObjects(line) {
+  const parts = splitRows(line);
+  if (parts.length <= 1) return [parseParams(line)];
+  return parts.map(parseParams);
 }
 
 // 从文本提取网易云歌曲 ID：支持 ?id=、/song/<id>、纯数字
@@ -428,13 +456,16 @@ function dispatchLine(line) {
     clearTimeout(head.timer);
     if (/^error id=0\b/i.test(line)) {
       const rows = head.rows;
-      resolveHead(head, rows.length ? rows[rows.length - 1] : {});
+      // 成功应答：若只解析出一行（多数命令）返回该对象，多行（列表类）返回数组。
+      // 兼容 TS3 单选行与 TS6 的 '|' 拼接多行的两种格式。
+      resolveHead(head, rows.length ? (rows.length === 1 ? rows[0] : rows) : {});
     } else {
       rejectHead(head, new Error(line));
     }
     return;
   }
-  head.rows.push(parseParams(line));
+  const objs = rowsOrObjects(line);
+  for (const o of objs) head.rows.push(o);
 }
 function resolveHead(h, v) { try { h.resolve(v); } catch (e) {} }
 function rejectHead(h, e) { try { h.reject(e); } catch (e2) {} }
@@ -923,5 +954,5 @@ module.exports = {
   rejoinChannel: joinBotChannel,
   getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword }),
   // 测试钩子（非公开接口）
-  _internal: { extractSongId, parseParams, esc, unesc, handleRequest },
+  _internal: { extractSongId, parseParams, esc, unesc, handleRequest, splitRows, isRowSeparator },
 };
