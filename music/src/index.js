@@ -356,7 +356,13 @@ app.post('/api/ts-bot/switch-channel', async (req, res) => {
   try {
     const ch = (req.body && req.body.channel) || '';
     if (!ch.trim()) return fail(res, 400, 'BAD_REQUEST', '频道不能为空');
-    ok(res, await tsbridge.switchChannel(ch));
+    const r = await tsbridge.switchChannel(ch);
+    // 机器人切到新频道后，让聊天点歌的查询客户端也移动到新频道，否则收不到该频道的 !点歌 等指令
+    try {
+      await new Promise((res) => setTimeout(res, 1500)); // 等机器人真正进入新频道、TS 列表刷新
+      await tschat.rejoinChannel();
+    } catch (e) { console.log('[switch] 聊天端重连频道失败: ' + (e && e.message)); }
+    ok(res, r);
   } catch (e) { fail(res, 502, 'TS_SWITCH_FAIL', e.message); }
 });
 app.get('/api/ts-bot/channels', async (req, res) => {

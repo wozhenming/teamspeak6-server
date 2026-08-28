@@ -170,7 +170,9 @@ function runSwitchChannel(arg, invokerName) {
       }
       const path = hit.path || hit.name;
       await tsbridge.switchChannel(path);
-      reply(invokerName, '✅ 已切换到频道：' + path);
+      // 机器人切频道后，让聊天点歌查询端也跟随到新频道，否则收不到该频道的指令
+      try { await new Promise((r) => setTimeout(r, 1500)); await joinBotChannel(); } catch (e) { console.log('[tschat] 切频道后重新加入失败: ' + (e && e.message)); }
+      reply(invokerName, '✅ 已切换到频道：' + path + '（点歌助手已跟随）');
     } catch (e) {
       reply(invokerName, '✖ 切换失败：' + e.message);
     }
@@ -458,35 +460,28 @@ function connect() {
 }
 
 let bootstrapped = false;
-async function bootstrap() {
+// 把聊天点歌查询客户端移动到“点歌机器人”所在频道并订阅聊天事件。
+// 抽成独立函数，便于机器人切换频道后（switchChannel）重新把查询端挪过去，
+// 否则查询端停留在旧频道，收不到新频道的 !点歌 等指令。
+async function joinBotChannel() {
+  if (!conn) return; // 连接已断开时不操作
   try {
-    await cmd('use ' + (process.env.TS_CHAT_SID || '1'));
-    // 昵称冲突自愈（上一次连接未干净退出时 513）
-    const baseNick = process.env.TS_CHAT_NICKNAME || '点歌助手';
-    let nick = baseNick;
-    try {
-      await cmd('clientupdate client_nickname=' + esc(nick));
-    } catch (e) {
-      nick = baseNick + Math.floor(Math.random() * 90 + 10);
-      await cmd('clientupdate client_nickname=' + esc(nick));
-    }
-    // 找到机器人所在频道并移过去（查询客户端只能收到自己所在频道的聊天）
     const who = await cmd('whoami');
     // TS6 的 whoami 字段为 client_id / client_channel_id（非 TS3 的 clid/cid）
     const myClid = who.client_id != null ? who.client_id : who.clid;
     const myCid = who.client_channel_id != null ? who.client_channel_id : who.cid;
     const list = await cmd('clientlist -uid');
-    // clientlist 单行时可能是对象，统一成数组
     const rawItems = Array.isArray(list) ? list : [list];
     const items = rawItems.filter(Boolean);
-    // 1) 优先按已配置的点歌频道名定位；2) 其次按机器人昵称；3) 兜底第一个语音用户频道
+    // 1) 优先按已配置的点歌频道名/路径定位；2) 其次按机器人昵称；3) 兜底第一个语音用户频道
     const wantName = (config.ts6mgrChannel || '').trim();
     const channelList = await cmd('channellist');
     const chItems = Array.isArray(channelList) ? channelList : [channelList];
     let botCid = null;
     let botSeen = items.some((x) => x.client_nickname && x.client_nickname.includes('点歌机器人'));
     if (wantName) {
-      const ch = chItems.find((x) => (x.channel_name || '') === wantName);
+      const ch = chItems.find((x) => (x.channel_name || '') === wantName)
+        || chItems.find((x) => (x.channel_name || '').endsWith(wantName.split('/').pop()));
       if (ch) botCid = ch.cid;
     }
     if (!botCid) {
@@ -508,9 +503,28 @@ async function bootstrap() {
       catch (e) { console.log('[tschat] 订阅 ' + ev + ' 失败：' + (e.message || e)); }
     }
     if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
+    console.log('[tschat] 已移动到频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
+  } catch (e) {
+    console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
+  }
+}
+async function bootstrap() {
+  try {
+    await cmd('use ' + (process.env.TS_CHAT_SID || '1'));
+    // 昵称冲突自愈（上一次连接未干净退出时 513）
+    const baseNick = process.env.TS_CHAT_NICKNAME || '点歌助手';
+    let nick = baseNick;
+    try {
+      await cmd('clientupdate client_nickname=' + esc(nick));
+    } catch (e) {
+      nick = baseNick + Math.floor(Math.random() * 90 + 10);
+      await cmd('clientupdate client_nickname=' + esc(nick));
+    }
+    // 找到机器人所在频道并移过去（查询客户端只能收到自己所在频道的聊天）
+    await joinBotChannel();
     bootstrapped = true;
     state = 'listening';
-    console.log('[tschat] 已加入频道并监听 !点歌 命令 (clid=' + myClid + ', cid=' + (botCid || myCid || '?') + ', 昵称=' + nick + ')');
+    console.log('[tschat] 已加入频道并监听 !点歌 命令 (昵称=' + nick + ')');
   } catch (e) {
     fail(e);
   }
@@ -585,6 +599,8 @@ module.exports = {
   stop,
   applyConfig,
   enabled,
+  // 机器人切换频道后调用：把聊天点歌查询端也挪到新频道（否则收不到指令）
+  rejoinChannel: joinBotChannel,
   getState: () => ({ state, enabled: enabled(), hasPassword: !!config.tsQueryAdminPassword }),
   // 测试钩子（非公开接口）
   _internal: { extractSongId, parseParams, esc, unesc, handleRequest },
