@@ -667,7 +667,7 @@ async function resumeRadio() {
   return { ok: true, botId: bot.id };
 }
 
-module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel };
+module.exports = { link, unlink, deleteBot, switchChannel, status, cfg, listChannels, resumeRadio, getBotClid, refreshBotClid, getBotChannel, getClientCidByName };
 
 // 音乐机器人的稳定身份：客户端唯一标识（UID，无法被改名伪造）。首次按昵称识别后缓存，
 // 之后优先用 UID 匹配，避免“有人把昵称改成点歌机器人”导致的误跟随。
@@ -757,6 +757,26 @@ async function getBotCurrentChannelServerSide() {
     console.log('[tsbridge][botChan] 失败: ' + (e && e.message ? e.message : e));
     return null;
   }
+}
+
+// 从 TS 服务器真实客户端列表查某昵称客户端“当前所在频道 cid”（权威视图，即普通语音客户端看到的真实位置）。
+// 用于跟随后校验：确认点歌助手与点歌机器人是否真的在同一频道。返回字符串 cid 或 null。
+async function getClientCidByName(nickSubstr) {
+  try {
+    const t = await getToken();
+    const c = cfg();
+    const bots = await getBots(t);
+    const target = pickBot(c, bots);
+    if (!target) return null;
+    const scId = target.serverConfigId || (await ensureServer(t, c));
+    const sid = await getVirtualServerId(t, scId);
+    const r = await authFetch('GET', '/api/servers/' + scId + '/vs/' + sid + '/clients', t);
+    if (r.status !== 200) return null;
+    const list = toArray(r.json);
+    const cl = list.find((x) => clientNick(x).includes(nickSubstr));
+    if (!cl) return null;
+    return cl.cid != null ? String(cl.cid) : (cl.channel_id != null ? String(cl.channel_id) : (cl.channelId != null ? String(cl.channelId) : null));
+  } catch (e) { return null; }
 }
 
 // 取音乐机器人当前所在频道（name + cid）。

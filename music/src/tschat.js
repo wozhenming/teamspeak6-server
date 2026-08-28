@@ -687,6 +687,13 @@ async function joinBotChannelBody() {
     }
     if (!botSeen) console.log('[tschat] 提示：未找到点歌机器人(' + BOT_NAME + ')，聊天点歌仅在「点歌助手」所在频道/私聊里有效');
     console.log('[tschat] 已就位频道 ' + (botCid || myCid || '?') + ' 并订阅聊天事件');
+    // 校验：用服务器权威视图确认点歌助手与点歌机器人是否真的同频道（ServerQuery 自报不可信）
+    try {
+      const qCid = await tsbridge.getClientCidByName(myNick);
+      const mCid = await tsbridge.getClientCidByName(BOT_NAME);
+      console.log('[tschat][verify] 跟随校验 点歌助手权威cid=' + qCid + ' 点歌机器人权威cid=' + mCid
+        + ((qCid && mCid && qCid === mCid) ? ' ✅同频道' : ' ❌不同频道'));
+    } catch (e) { /* 忽略 */ }
   } catch (e) {
     console.log('[tschat] 重新加入频道失败：' + (e && e.message ? e.message : e));
   }
