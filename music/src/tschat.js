@@ -413,9 +413,12 @@ const pending = []; // { rows, resolve, reject, timer }
 function dispatchLine(line) {
   if (line.startsWith('notifytextmessage')) {
     const p = parseParams(line);
-    console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' msg=' + String(p.msg || '').slice(0, 80));
-    const uid = p.invokeruid || '';
-    if (uid !== 'serveradmin') handleRequest(p.msg || '', p.invokername || '?');
+    console.log('[tschat] 收到聊天 from=' + (p.invokername || '?') + ' uid=' + (p.invokeruid || '') + ' tm=' + (p.targetmode || '?') + ' msg=' + String(p.msg || '').slice(0, 120));
+    const invName = (p.invokername || '').trim();
+    // 仅忽略“自己发出的回执”（按昵称判断，最可靠）；不再用 uid==='serveradmin' 过滤，
+    // 因为该 TS 服务器的 ServerQuery 会把所有消息的 invokeruid 都报成 serveradmin，会误杀真实用户指令。
+    if (invName && invName === myNick) return;
+    handleRequest(p.msg || '', invName || '?');
     return;
   }
   const head = pending[0];
