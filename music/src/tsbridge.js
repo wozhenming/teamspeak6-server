@@ -306,13 +306,35 @@ function extractBotStatus(json) {
   return all[all.length - 1] || null;
 }
 
+// 从 ts6-manager 的 bot 响应里取出首个匹配的字段（用于抓取 error/message 等详情）
+function extractBotField(json, names) {
+  if (!json) return null;
+  let found = null;
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    for (const n of names) {
+      if (o[n] != null && typeof o[n] !== 'object' && found == null) found = o[n];
+    }
+    for (const k of Object.keys(o)) { if (o[k] && typeof o[k] === 'object') walk(o[k]); }
+  };
+  walk(json);
+  return found;
+}
+
 async function waitBotConnected(token, botId, tries = 30) {
+  let dumped = false;
   for (let i = 0; i < tries; i++) {
     try {
       const { status, json } = await authFetch('GET', '/api/music-bots/' + botId, token);
       if (status === 200) {
         const s = extractBotStatus(json);
-        if (i % 3 === 0 || s) console.log('[tsbridge] waitBotConnected: 当前 status=' + s + ' (尝试 ' + (i + 1) + '/' + tries + ')');
+        const detail = extractBotField(json, ['error', 'errorMessage', 'message', 'lastError', 'reason', 'description', 'detail']);
+        if (!dumped && (s === 'error' || s === 'stopped')) {
+          dumped = true;
+          console.log('[tsbridge] waitBotConnected: 首次失败，bot 详情=' + JSON.stringify(json));
+        } else if (i % 3 === 0 || s) {
+          console.log('[tsbridge] waitBotConnected: 当前 status=' + s + (detail ? ' 详情=' + detail : '') + ' (尝试 ' + (i + 1) + '/' + tries + ')');
+        }
         if (s === 'connected' || s === 'playing' || s === 'paused') return true;
       } else {
         console.log('[tsbridge] waitBotConnected: GET 状态码 ' + status);
@@ -611,9 +633,10 @@ async function status() {
         bot = (json.data && json.data.bot) || json.data || json;
       }
       const botStatus = extractBotStatus(bot) || bot.status;
+      const botError = extractBotField(bot, ['error', 'errorMessage', 'message', 'lastError', 'reason', 'description', 'detail']);
       const clid = b_clid(bot);
       if (clid != null) botTsClid = clid;
-      return { enabled: true, connected: botStatus === 'connected' || botStatus === 'playing' || botStatus === 'paused', status: botStatus, nowPlaying: bot.nowPlaying || null, clid: clid };
+      return { enabled: true, connected: botStatus === 'connected' || botStatus === 'playing' || botStatus === 'paused', status: botStatus, error: botError || null, nowPlaying: bot.nowPlaying || null, clid: clid };
     };
     return await withAuth(run(token));
   } catch (e) {
