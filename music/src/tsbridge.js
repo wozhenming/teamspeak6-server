@@ -572,6 +572,7 @@ async function repairChannel(channel) {
   if (!ok) throw new Error('机器人重连超时');
   const play = await authFetch('POST', '/api/music-bots/' + botId + '/play-radio', token, { stationId });
   if (play.status !== 200) throw new Error(apiErrText(play.status, play.json, '播放电台失败'));
+  statusCache = null; // 修复完成立即反映到面板状态
   console.log('[tsbridge] 频道「' + channel + '」的机器人已恢复在线');
 }
 
@@ -629,6 +630,7 @@ async function link() {
     try {
       const r = await linkImpl();
       desiredLinked = true;
+      statusCache = null; // 部署完成立即反映到面板状态
       startWatchdog();
       return r;
     } finally {
@@ -641,6 +643,7 @@ async function link() {
 // 断开：停止所有我们部署的机器人的播放（机器人留在各自频道不动）
 async function unlink() {
   stopWatchdog();
+  statusCache = null; // 断开后立即反映到面板状态
   const token = await getToken();
   const bots = await getBots(token);
   const targets = ourBots(bots);
@@ -676,11 +679,18 @@ async function deleteBot() {
   }
   config.saveTsBridge({ ts6mgrChannelBots: {}, ts6mgrBotId: '' });
   botClidByChannel.clear();
+  statusCache = null;
   return { ok: true, deleted: deleted > 0, count: deleted };
 }
 
-// 聚合状态：每个频道的机器人状态一行；connected = 所有已部署频道都在线
+// 聚合状态：每个频道的机器人状态一行；connected = 所有已部署频道都在线。
+// 结果缓存 5s：面板每 15s 轮询一次 status（getBots + 每机器人详情是多次对
+// ts6-manager 的 HTTP），缓存可避免它与 resumeRadio/play-radio 排队相互拖慢。
+let statusCache = null; // { at, value }
+const STATUS_TTL = 5000;
+
 async function status() {
+  if (statusCache && Date.now() - statusCache.at < STATUS_TTL) return statusCache.value;
   const c = cfg();
   const channels = configChannels();
   let token;
@@ -690,8 +700,8 @@ async function status() {
     const byId = {};
     (Array.isArray(bots) ? bots : []).forEach((b) => { if (b && b.id != null) byId[String(b.id)] = b; });
     const bindings = botBindings();
-    const chs = [];
-    for (const channel of channels) {
+    // 并行取各频道机器人状态（串行会在多频道时放大 ts6-manager 的响应延迟）
+    const chs = await Promise.all(channels.map(async (channel) => {
       const bound = bindings[channel] != null ? String(bindings[channel]) : null;
       let bot = bound != null ? byId[bound] : null;
       if (!bot) {
@@ -709,7 +719,7 @@ async function status() {
       const clid = bot ? b_clid(bot) : null;
       if (clid != null) botClidByChannel.set(channel, clid);
       else botClidByChannel.delete(channel);
-      chs.push({
+      return {
         channel,
         botId: bot ? String(bot.id) : bound,
         nickname: bot ? (bot.nickname || bot.name || botNameFor(channel)) : botNameFor(channel),
@@ -718,14 +728,16 @@ async function status() {
         error: error || null,
         nowPlaying: bot ? (bot.nowPlaying || null) : null,
         clid,
-      });
-    }
+      };
+    }));
     const connected = chs.length > 0 && chs.every((x) => x.connected);
     const playing = chs.find((x) => x.nowPlaying);
     const agg = !chs.length ? 'empty'
       : connected ? 'connected'
         : chs.some((x) => x.connected) ? 'partial' : 'disconnected';
-    return { enabled: true, connected, status: agg, channels: chs, nowPlaying: playing ? playing.nowPlaying : null };
+    const result = { enabled: true, connected, status: agg, channels: chs, nowPlaying: playing ? playing.nowPlaying : null };
+    statusCache = { at: Date.now(), value: result };
+    return result;
   } catch (e) {
     return { enabled: true, connected: false, channels: [], error: e.message };
   }
