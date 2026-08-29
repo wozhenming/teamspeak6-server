@@ -44,12 +44,8 @@ let sqPort = 0;
 const moves = [];    // clientmove 命令
 const subs = [];     // servernotifyregister 命令
 const replies = [];  // sendtextmessage 的 msg（已反转义）
-const kicks = [];    // clientkick 命令（残留会话清理）
 const seenCmds = []; // 全部命令名（诊断用）
 let clientStreams = []; // 所有会话的 shell 流（用于注入 notify）
-
-// 频道名（叶子）→ cid，供 channelidbyname 使用
-const CID_BY_NAME = { '点歌专区': 3, '开黑房': 4 };
 
 function handleCommand(line, stream) {
   const name = line.split(/\s+/)[0];
@@ -60,18 +56,10 @@ function handleCommand(line, stream) {
   else if (name === 'channellist') {
     stream.write('cid=1 pid=0 channel_name=Default\\sChannel|cid=2 pid=0 channel_name=默认频道|cid=3 pid=2 channel_name=点歌专区|cid=4 pid=2 channel_name=开黑房\n');
     ok();
-  } else if (name === 'channelidbyname') {
-    // 模拟真实 TS6：按名字返回 cid（空格被转义为 \s）
-    const raw = (line.match(/channel_name=([^\s]+)/) || [])[1] || '';
-    const nm = String(raw).replace(/\\s/g, ' ').replace(/\\p/g, '|').replace(/\\\\/g, '\\');
-    if (CID_BY_NAME[nm] != null) { stream.write('cid=' + CID_BY_NAME[nm] + '\n'); ok(); }
-    else ok();
   } else if (name === 'clientlist') {
-    // 包含一个历史遗留的「点歌助手47」残留会话（clid=77），应被自动清理
-    stream.write('clid=9 client_nickname=serveradmin client_type=1|clid=77 client_nickname=点歌助手47 client_type=1|clid=50 client_nickname=serveradmin\\sfrom\\s127.0.0.1 client_type=1\n');
+    stream.write('clid=9 client_nickname=serveradmin client_type=1|clid=50 client_nickname=serveradmin\\sfrom\\s127.0.0.1 client_type=1\n');
     ok();
-  } else if (name === 'clientkick') { kicks.push(line); ok(); }
-  else if (name === 'whoami') { stream.write('clid=9 cid=1 client_nickname=serveradmin\n'); ok(); }
+  } else if (name === 'whoami') { stream.write('clid=9 cid=1 client_nickname=serveradmin\n'); ok(); }
   else if (name === 'clientupdate') ok();
   else if (name === 'clientmove') { moves.push(line); ok(); }
   else if (name === 'servernotifyregister') { subs.push(line); ok(); }
@@ -140,8 +128,7 @@ async function main() {
   check('单频道助手用原名「点歌助手」', st.sessions[0] && st.sessions[0].nick === '点歌助手', st.sessions[0] && st.sessions[0].nick);
   check('解析到点歌专区频道并 clientmove(cid=3)', moves.some((m) => /clientmove\s+cid=3\b/.test(m)), moves);
   check('订阅了聊天事件（3 类）', subs.length === 3, subs);
-  check('清理了残留的点歌助手47 会话(clid=77)', kicks.some((k) => /clientkick\s+clid=77\b/.test(k)), kicks);
-  check('存活会话不会被误踢', !kicks.some((k) => /clid=9\b/.test(k)), kicks);
+  check('未发送 channelidbyname（release 稳定版不含该命令）', !seenCmds.some((c) => c.startsWith('channelidbyname')), seenCmds.filter((c) => c.startsWith('channel')));
 
   // ---- 2. 频道聊天点歌 → 入本频道队列 → 频道回执 ----
   injectChat(clientStreams[0], '!点歌 742360', '测试用户');
