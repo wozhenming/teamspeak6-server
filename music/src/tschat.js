@@ -480,31 +480,45 @@ function q(str) {
     .replace(/ /g, '\\s');
 }
 
-// 用 channelidbyname 把“频道名”解析成 cid；受限失败则逐个探测 channelinfo 兜底。
-// 支持「完整路径」与「叶子频道名」两种写法（TS 的 channel_name 只有叶子）。
+// 解析频道 cid（多管齐下，兼容 TS6 查询端可见性受限的情况）：
+// 1) channelidbyname（按名字→cid，旧版已在真实 TS6 上验证可用）
+// 2) channellist 精确/叶子匹配（支持 '|' 拼接多行）
+// 3) channelinfo 逐个探测
+// 全部失败时抛错并带上「查询端实际看到的频道名」，便于从日志定位。
 async function resolveChannelCid(session, channelPath) {
   const want = String(channelPath || '').trim();
-  const leaf = want.split('/').pop().trim().toLowerCase();
-  const tryMatch = (obj) => {
-    const n = String(obj.channel_name || '').trim().toLowerCase();
-    return n === want.toLowerCase() || (leaf && n === leaf) || null;
-  };
+  const leaf = want.split('/').pop().trim();
+  const low = (v) => String(v || '').trim().toLowerCase();
+  // 1) channelidbyname：不依赖查询端可见性，优先尝试（叶子名 + 完整名都试）
+  for (const nm of [leaf, want]) {
+    if (!nm) continue;
+    try {
+      const r = await cmd(session, 'channelidbyname channel_name=' + q(nm));
+      const obj = (Array.isArray(r) ? r[0] : r) || {};
+      if (obj.cid != null) return String(obj.cid);
+    } catch (e) { /* 部分版本不支持该命令，继续走下一途径 */ }
+  }
+  // 2) channellist 匹配
+  let seen = [];
   try {
     const cl = await cmd(session, 'channellist');
     const items = (Array.isArray(cl) ? cl : [cl]).filter(Boolean);
+    seen = items.map((c) => c.channel_name);
     for (const ch of items) {
-      if (tryMatch(ch) && ch.cid != null) return String(ch.cid);
+      if ((low(ch.channel_name) === low(want) || low(ch.channel_name) === low(leaf)) && ch.cid != null) {
+        return String(ch.cid);
+      }
     }
-  } catch (e) { /* 退化到逐个探测 */ }
-  // 退化：探测 cid=1..12，匹配频道名
-  for (let cid = 1; cid <= 12; cid++) {
+  } catch (e) { /* 继续走下一途径 */ }
+  // 3) channelinfo 逐个探测
+  for (let cid = 1; cid <= 20; cid++) {
     try {
       const ci = await cmd(session, 'channelinfo cid=' + cid);
       const o = (Array.isArray(ci) ? ci[0] : ci) || {};
-      if ((o.channel_name || '').trim().toLowerCase() === leaf || (o.channel_name || '').trim().toLowerCase() === want.toLowerCase()) return String(cid);
+      if (low(o.channel_name) === low(leaf) || low(o.channel_name) === low(want)) return String(cid);
     } catch (e) { /* 该 cid 可能不存在，忽略 */ }
   }
-  return null;
+  throw new Error('找不到频道「' + want + '」（查询端 channellist 实际看到: ' + JSON.stringify(seen) + '）');
 }
 
 // ---------- 单会话 SSH 连接管理 ----------
@@ -577,19 +591,39 @@ async function bootstrap(session) {
     session.nick = nick;
     await joinOwnChannel(session);
     session.state = 'listening';
+    session.retryAttempt = 0; // 连续失败计数清零（退避重置）
     console.log('[tschat][' + session.channel + '] 已驻留频道并监听点歌指令 (昵称=' + nick + ')');
   } catch (e) {
     fail(session, e);
   }
 }
 
-// 把本会话的查询客户端移动到自己绑定的频道（失败重试；已在则返回 id=770 视为成功）
+// 把本会话的查询客户端移动到自己绑定的频道（失败重试；已在则返回 id=770 视为成功）。
+// 同时清理重连堆积的「点歌助手*」残留查询会话：TS6 有会话/洪水限制，
+// 残留会话堆积会导致 shell 反复 closed（每次重连新建一个，越积越多）。
+const liveClids = new Map(); // 频道 → 当前存活会话的 clid（各会话注册，互不误踢）
+
 async function joinOwnChannel(session) {
   const cid = await resolveChannelCid(session, session.channel);
-  if (!cid) throw new Error('找不到频道「' + session.channel + '」，请确认频道存在');
   const me = await myInfo(session);
   const myClid = me.clid;
   if (!myClid) throw new Error('无法获取查询端自身 clid');
+  liveClids.set(session.channel, String(myClid));
+  // 清理残留助手会话：昵称以「点歌助手」开头、且不在存活注册表里的都是历史遗留
+  try {
+    const list = await cmd(session, 'clientlist');
+    const items = (Array.isArray(list) ? list : [list]).filter(Boolean);
+    const live = new Set([...liveClids.values()]);
+    const base = assistantBase();
+    for (const h of items) {
+      const nick = String(h.client_nickname || '');
+      const clid = h.clid != null ? String(h.clid) : (h.client_id != null ? String(h.client_id) : null);
+      if (!clid || clid === String(myClid)) continue;
+      if (!nick.startsWith(base) || live.has(clid)) continue;
+      cmd(session, 'clientkick clid=' + clid + ' reasonid=5 reasonmsg=' + q('点歌助手会话已重建，清理残留')).catch(() => {});
+      console.log('[tschat][' + session.channel + '] 已清理残留查询会话: ' + nick + '(clid=' + clid + ')');
+    }
+  } catch (e) { /* 清理失败不阻断驻留 */ }
   const cpw = (config.ts6mgrChannelPassword || '').trim();
   let moved = false;
   for (let attempt = 0; attempt < 3 && !moved; attempt++) {
@@ -665,11 +699,14 @@ async function selectVirtualServer(session, wantName) {
 
 function scheduleRetry(session) {
   if (session.retryTimer) return;
+  session.retryAttempt = (session.retryAttempt || 0) + 1;
+  const wait = Math.min(60000, 8000 * session.retryAttempt); // 指数退避：8s/16s/24s…封顶 60s，防重连风暴堆积查询会话
+  console.log('[tschat][' + session.channel + '] ' + Math.round(wait / 1000) + 's 后重试（第 ' + session.retryAttempt + ' 次）');
   session.retryTimer = setTimeout(() => {
     session.retryTimer = null;
     if (!session.started) return;
     connect(session);
-  }, 8000);
+  }, wait);
 }
 
 function fail(session, err) {
@@ -695,6 +732,7 @@ function teardownSession(session) {
   session.started = false;
   session.state = 'stopped';
   if (session.retryTimer) { clearTimeout(session.retryTimer); session.retryTimer = null; }
+  liveClids.delete(session.channel);
   teardownConn(session);
 }
 
@@ -712,7 +750,7 @@ function syncSessions() {
       console.log('[tschat] 频道「' + ch + '」已从部署列表移除，点歌助手停止');
     }
   }
-  // 为新频道创建会话（错峰连接，避免同时大量查询登录触发洪水限制）
+  // 为新频道创建会话（错峰连接，避免同时大量查询登录触发 TS6 会话/洪水限制）
   let delay = 0;
   for (const ch of channels) {
     if (sessions.has(ch)) continue;
@@ -721,7 +759,7 @@ function syncSessions() {
     setTimeout(() => {
       if (sessions.get(ch) === s && s.started && enabled()) connect(s);
     }, delay);
-    delay += 1500;
+    delay += 2500;
     s.started = true;
     s.state = 'connecting';
     console.log('[tschat] 将为频道「' + ch + '」启动点歌助手（' + assistantNameFor(ch) + '）');
